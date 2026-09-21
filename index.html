@@ -237,6 +237,16 @@ body[data-view="stats"] .fab,body[data-view="me"] .fab{display:none}
 #toast{position:fixed;left:50%;bottom:calc(96px + var(--safe-b));transform:translate(-50%,14px);background:rgba(20,30,33,.94);
   color:#fff;padding:10px 18px;border-radius:999px;font-size:14px;opacity:0;pointer-events:none;transition:.22s;z-index:120;max-width:82vw;text-align:center}
 #toast.show{opacity:1;transform:translate(-50%,0)}
+
+/* 新版本提示条 */
+#updateBar{position:fixed;left:14px;right:14px;bottom:calc(78px + var(--safe-b));z-index:110;
+  background:var(--brand);color:var(--brand-fg);border-radius:14px;padding:11px 12px 11px 16px;
+  display:flex;align-items:center;gap:10px;font-size:14px;font-weight:600;
+  box-shadow:0 6px 22px rgba(15,118,110,.42)}
+#updateBar span{flex:1}
+#updateBar button{background:rgba(255,255,255,.22);color:inherit;border-radius:999px;padding:6px 14px;font-size:13.5px;font-weight:650}
+#updateBar button:active{background:rgba(255,255,255,.36)}
+#updateBar .x{padding:6px 10px;font-size:13px;background:none}
 @media (min-width:560px){
   #app{max-width:520px;margin:0 auto;box-shadow:0 0 50px rgba(0,0,0,.09)}
   .fab{right:calc(50% - 260px + 18px)}
@@ -375,12 +385,16 @@ body[data-view="stats"] .fab,body[data-view="me"] .fab{display:none}
           <div class="t" style="color:var(--brand);font-weight:600">安装到桌面（全屏、无地址栏）</div>
           <div class="v">›</div>
         </button>
+        <button class="setrow" id="checkUpdateRow">
+          <div class="t">检查更新<small id="updateInfo">有新版本会自动提示，也可以手动检查</small></div>
+          <div class="v">›</div>
+        </button>
       </div>
 
       <div class="card">
         <div style="font-size:15px;font-weight:650;margin-bottom:6px">关于「轻记账」</div>
         <div style="font-size:13px;color:var(--muted);line-height:1.75">
-          版本 1.0.0 · 单文件 · 完全离线<br>
+          版本 <span id="appVer">1.1.0</span> · 单文件 · 完全离线<br>
           所有数据只保存在本机浏览器里，不上传任何服务器。<br>
           卸载应用或清除浏览器数据会一并删除流水，请谨慎操作。<br>
           <span id="installHint"></span>
@@ -454,6 +468,12 @@ body[data-view="stats"] .fab,body[data-view="me"] .fab{display:none}
 
 <div id="toast"></div>
 
+<div id="updateBar" hidden>
+  <span>发现新版本</span>
+  <button id="updateNow">立即更新</button>
+  <button id="updateLater" class="x" aria-label="稍后">✕</button>
+</div>
+
 <script>
 (function(){
 'use strict';
@@ -488,6 +508,8 @@ var PALETTE = ['#0d9488','#f59e0b','#6366f1','#ef4444','#10b981','#8b5cf6','#ec4
                '#0891b2','#f97316','#3b82f6','#84cc16','#a855f7','#eab308','#14b8a6','#64748b'];
 var WEEK = ['日','一','二','三','四','五','六'];
 var TYPE_NAME = { expense:'支出', income:'收入' };
+/* 改完功能把这里 +1，就能在手机「我的 → 检查更新」里一眼确认更新到底生效没有 */
+var APP_VERSION = '1.1.0';
 
 function $(id){ return document.getElementById(id); }
 function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, function(c){
@@ -1307,6 +1329,9 @@ $('csvRow').onclick = function(){
 };
 $('snapListRow').onclick = openSnapList;
 $('runStateRow').onclick = openRunHelp;
+$('checkUpdateRow').onclick = checkUpdate;
+$('updateNow').onclick = function(){ location.reload(); };
+$('updateLater').onclick = function(){ $('updateBar').hidden = true; };
 $('installBtn').onclick = function(){
   if(!deferredPrompt) return;
   var p = deferredPrompt;
@@ -1393,6 +1418,8 @@ window.addEventListener('popstate', function(){ if($('sheet').classList.contains
 
 /* ===================== 启动 ===================== */
 buildPad();
+$('appVer').textContent = APP_VERSION;
+$('updateInfo').textContent = '当前版本 ' + APP_VERSION + ' · 有新版本会自动提示';
 renderList(); renderStats(); renderMe();
 var hashView = (location.hash || '').replace('#','');
 if(hashView === 'stats' || hashView === 'me') switchView(hashView);
@@ -1406,13 +1433,43 @@ if(cfg.snapOn !== false && records.length && cfg.lastSnap !== todayStr()){
   renderMe();
 }
 setTimeout(maybeAutoExport, 1500);
+initSW();
 
 /* service worker（仅在通过 http/https 打开时生效，file:// 下自动跳过） */
-/* service worker：只有安全来源（https / localhost）才允许注册，http 局域网地址会静默失败 */
-if('serviceWorker' in navigator && window.isSecureContext){
-  window.addEventListener('load', function(){
-    navigator.serviceWorker.register('sw.js').catch(function(){});
+/* service worker：只有安全来源（https / localhost）才允许注册，http 局域网地址会静默失败。
+   更新策略：导航请求在 sw.js 里是「网络优先」，所以联网打开一次就能拿到新版 index.html；
+   这里额外做的是——发现新版本时主动提示，以及给一个手动检查的入口。 */
+var swReg = null, hadController = false;
+
+function initSW(){
+  if(!('serviceWorker' in navigator) || !window.isSecureContext) return;
+  hadController = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.register('sw.js').then(function(reg){
+    swReg = reg;
+    reg.addEventListener('updatefound', function(){
+      var nw = reg.installing;
+      if(!nw) return;
+      nw.addEventListener('statechange', function(){
+        // installed + 已有旧版本在跑 = 这是一次更新，而不是首次安装
+        if(nw.state === 'installed' && navigator.serviceWorker.controller) showUpdateBar();
+      });
+    });
+    if(hadController) reg.update().catch(function(){});   // 每次打开顺便查一次
+  }).catch(function(){});
+  navigator.serviceWorker.addEventListener('controllerchange', function(){
+    if(hadController) showUpdateBar();
   });
+}
+function showUpdateBar(){
+  $('updateBar').hidden = false;
+  $('updateInfo').textContent = '有新版本已下载好，点右侧「立即更新」生效';
+}
+function checkUpdate(){
+  if(!swReg){ toast('当前环境不支持自动更新（需要 https 打开并已安装）'); return; }
+  toast('正在检查更新…');
+  swReg.update().then(function(){
+    setTimeout(function(){ if($('updateBar').hidden) toast('已是最新版本'); }, 800);
+  }).catch(function(){ toast('检查失败，请检查网络'); });
 }
 
 /* 自检入口：index.html#selftest */
@@ -1420,7 +1477,7 @@ window.__jz = { toCents:toCents, yuan:yuan, shiftMonth:shiftMonth, monthLabel:mo
                 aggregate:aggregate, sumCents:sumCents, pinHash:pinHash, ymd:ymd, daysInMonth:daysInMonth,
                 buildBackup:buildBackup, toCSV:toCSV, parseBackupText:parseBackupText,
                 normalizeRows:normalizeRows, snapshot:snapshot, loadBackups:loadBackups,
-                runtimeInfo:runtimeInfo };
+                runtimeInfo:runtimeInfo, showUpdateBar:showUpdateBar, checkUpdate:checkUpdate };
 
 if(location.hash.indexOf('selftest') >= 0){
   var pass = 0, fail = [];
