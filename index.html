@@ -154,6 +154,11 @@ input{background:none;border:0;outline:none}
 .ghost:active{background:var(--brand-soft)}
 
 /* 我的 */
+.balance{font-size:31px;font-weight:700;letter-spacing:-.6px;margin:5px 0 14px;line-height:1.15;font-variant-numeric:tabular-nums}
+.minirow{display:flex;border-top:1px solid var(--line);padding-top:12px}
+.mini{flex:1;text-align:center;min-width:0}
+.mini .k{font-size:12.5px;color:var(--muted)}
+.mini .v{font-size:17px;font-weight:650;margin-top:2px;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .setrow{display:flex;align-items:center;gap:12px;padding:13px 14px;border-bottom:1px solid var(--line);width:100%;text-align:left}
 .setrow:last-child{border-bottom:0}
 .setrow .t{flex:1;font-size:15px}
@@ -310,10 +315,15 @@ body[data-view="stats"] .fab,body[data-view="me"] .fab{display:none}
     <!-- 我的 -->
     <section class="view" id="v-me">
       <div class="card" style="margin-bottom:14px">
-        <div style="display:flex;justify-content:space-between;text-align:center">
-          <div style="flex:1"><div style="font-size:12.5px;color:var(--muted)">累计记账</div><div style="font-size:20px;font-weight:650" id="meCount">0</div></div>
-          <div style="flex:1"><div style="font-size:12.5px;color:var(--muted)">记账天数</div><div style="font-size:20px;font-weight:650" id="meDays">0</div></div>
-          <div style="flex:1"><div style="font-size:12.5px;color:var(--muted)">累计支出</div><div style="font-size:20px;font-weight:650" id="meTotal">0</div></div>
+        <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px">
+          <div style="font-size:12.5px;color:var(--muted)">总结余 · 全部收入 − 全部支出</div>
+          <div style="font-size:12.5px;color:var(--muted)"><span id="meCount">0</span> 笔</div>
+        </div>
+        <div class="balance" id="meBalance">¥0.00</div>
+        <div class="minirow">
+          <div class="mini"><div class="k">累计收入</div><div class="v" id="meIncome">0.00</div></div>
+          <div class="mini"><div class="k">累计支出</div><div class="v" id="meTotal">0.00</div></div>
+          <div class="mini"><div class="k">记账天数</div><div class="v" id="meDays">0</div></div>
         </div>
       </div>
 
@@ -394,7 +404,7 @@ body[data-view="stats"] .fab,body[data-view="me"] .fab{display:none}
       <div class="card">
         <div style="font-size:15px;font-weight:650;margin-bottom:6px">关于「轻记账」</div>
         <div style="font-size:13px;color:var(--muted);line-height:1.75">
-          版本 <span id="appVer">1.1.0</span> · 单文件 · 完全离线<br>
+          版本 <span id="appVer">1.2.0</span> · 单文件 · 完全离线<br>
           所有数据只保存在本机浏览器里，不上传任何服务器。<br>
           卸载应用或清除浏览器数据会一并删除流水，请谨慎操作。<br>
           <span id="installHint"></span>
@@ -499,9 +509,10 @@ function saveJSON(key, val){
 
 /* ===================== 常量 / 工具 ===================== */
 var CATS = {
-  expense: [['餐饮','🍚'],['交通','🚌'],['购物','🛒'],['居住','🏠'],['水电','💡'],
-            ['通讯','📱'],['服饰','👕'],['医疗','💊'],['娱乐','🎮'],['学习','📚'],
-            ['人情','🎁'],['旅行','✈️'],['运动','🏃'],['宠物','🐾'],['其他','📦']],
+  expense: [['餐饮','🍚'],['零食','🍿'],['饮品','🥤'],['交通','🚌'],['购物','🛒'],
+            ['居住','🏠'],['水电','💡'],['通讯','📱'],['服饰','👕'],['医疗','💊'],
+            ['娱乐','🎮'],['学习','📚'],['人情','🎁'],['旅行','✈️'],['运动','🏃'],
+            ['宠物','🐾'],['token','🪙'],['其他','📦']],
   income:  [['工资','💰'],['奖金','🏆'],['红包','🧧'],['兼职','💼'],['理财','📈'],['报销','🧾'],['其他','📦']]
 };
 var PALETTE = ['#0d9488','#f59e0b','#6366f1','#ef4444','#10b981','#8b5cf6','#ec4899',
@@ -509,7 +520,7 @@ var PALETTE = ['#0d9488','#f59e0b','#6366f1','#ef4444','#10b981','#8b5cf6','#ec4
 var WEEK = ['日','一','二','三','四','五','六'];
 var TYPE_NAME = { expense:'支出', income:'收入' };
 /* 改完功能把这里 +1，就能在手机「我的 → 检查更新」里一眼确认更新到底生效没有 */
-var APP_VERSION = '1.1.0';
+var APP_VERSION = '1.2.0';
 
 function $(id){ return document.getElementById(id); }
 function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, function(c){
@@ -972,12 +983,20 @@ function readFileText(file, cb){
 function setSwitch(el, on){ el.classList.toggle('on', !!on); el.setAttribute('aria-checked', on ? 'true' : 'false'); }
 
 function renderMe(){
-  $('meCount').textContent = records.length;
   var days = {};
   records.forEach(function(r){ days[r.date] = 1; });
+  var totalIn = sumCents(records.filter(function(r){ return r.type === 'income'; }));
+  var totalOut = sumCents(records.filter(function(r){ return r.type === 'expense'; }));
+  var bal = totalIn - totalOut;
+
+  $('meCount').textContent = records.length;
   $('meDays').textContent = Object.keys(days).length;
-  var t = sumCents(records.filter(function(r){ return r.type === 'expense'; }));
-  $('meTotal').textContent = kYuan(t);
+  $('meIncome').textContent = yuan(totalIn);
+  $('meTotal').textContent = yuan(totalOut);
+  var balEl = $('meBalance');
+  balEl.textContent = (bal < 0 ? '-' : '') + '¥' + yuan(Math.abs(bal));
+  balEl.style.color = bal < 0 ? 'var(--exp)' : (bal > 0 ? 'var(--inc)' : 'var(--muted)');
+
   setSwitch($('pinSwitch'), !!cfg.pin);
   setSwitch($('snapSwitch'), cfg.snapOn !== false);
   $('autoExport').value = Object.prototype.hasOwnProperty.call(EXPORT_MS, cfg.autoExport) ? cfg.autoExport : 'weekly';
@@ -1477,7 +1496,7 @@ window.__jz = { toCents:toCents, yuan:yuan, shiftMonth:shiftMonth, monthLabel:mo
                 aggregate:aggregate, sumCents:sumCents, pinHash:pinHash, ymd:ymd, daysInMonth:daysInMonth,
                 buildBackup:buildBackup, toCSV:toCSV, parseBackupText:parseBackupText,
                 normalizeRows:normalizeRows, snapshot:snapshot, loadBackups:loadBackups,
-                runtimeInfo:runtimeInfo, showUpdateBar:showUpdateBar, checkUpdate:checkUpdate };
+                runtimeInfo:runtimeInfo, showUpdateBar:showUpdateBar, checkUpdate:checkUpdate, CATS:CATS };
 
 if(location.hash.indexOf('selftest') >= 0){
   var pass = 0, fail = [];
