@@ -1,0 +1,17 @@
+# ---- 构建产物 ----
+# GitHub Pages 直接从仓库根目录发布（index.html 等本来就在根目录），
+# 所以 dist/ 不必提交；它只在你用 Cloudflare Pages / Netlify Drop
+# 拖文件夹部署时才需要，本地跑 node build.mjs 生成即可。
+dist/
+
+# ---- 临时文件 ----
+_*.mjs
+_*.html
+*.log
+
+# ---- 系统 / 编辑器 ----
+Thumbs.db
+Desktop.ini
+.vscode/
+.idea/
+.DS_Store
