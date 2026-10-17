@@ -387,31 +387,6 @@ body[data-view="stats"] .fab,body[data-view="me"] .fab{display:none}
           <div class="v">›</div>
         </button>
       </div>
-
-      <div class="card" style="padding:0;overflow:hidden;margin-bottom:14px">
-        <button class="setrow" id="runStateRow">
-          <div class="t">运行方式<small id="runStateInfo">检测中…</small></div>
-          <div class="v">›</div>
-        </button>
-        <button class="setrow" id="installBtn" hidden>
-          <div class="t" style="color:var(--brand);font-weight:600">安装到桌面（全屏、无地址栏）</div>
-          <div class="v">›</div>
-        </button>
-        <button class="setrow" id="checkUpdateRow">
-          <div class="t">检查更新<small id="updateInfo">有新版本会自动提示，也可以手动检查</small></div>
-          <div class="v">›</div>
-        </button>
-      </div>
-
-      <div class="card">
-        <div style="font-size:15px;font-weight:650;margin-bottom:6px">关于「轻记账」</div>
-        <div style="font-size:13px;color:var(--muted);line-height:1.75">
-          版本 <span id="appVer">1.4.1</span> · 单文件 · 完全离线<br>
-          所有数据只保存在本机浏览器里，不上传任何服务器。<br>
-          卸载应用或清除浏览器数据会一并删除流水，请谨慎操作。<br>
-          <span id="installHint"></span>
-        </div>
-      </div>
     </section>
   </div>
 
@@ -523,7 +498,7 @@ var PALETTE = ['#0d9488','#f59e0b','#6366f1','#ef4444','#10b981','#8b5cf6','#ec4
 var WEEK = ['日','一','二','三','四','五','六'];
 var TYPE_NAME = { expense:'支出', income:'收入' };
 /* 改完功能把这里 +1，就能在手机「我的 → 检查更新」里一眼确认更新到底生效没有 */
-var APP_VERSION = '1.4.1';
+var APP_VERSION = '1.4.2';
 
 function $(id){ return document.getElementById(id); }
 function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, function(c){
@@ -1069,80 +1044,6 @@ function renderMe(){
   $('lockDelayRow').style.opacity = cfg.pin ? '1' : '.45';
   $('lockDelay').value = String(cfg.lockDelay);
   $('lockDelay').disabled = !cfg.pin;
-  refreshRuntime();
-}
-
-/* ---- 运行方式检测：为什么顶部有地址栏 ---- */
-var deferredPrompt = null;
-
-function runtimeInfo(){
-  var proto = String(location.protocol || '').replace(':', '');
-  var host = String(location.hostname || '');
-  var secure;
-  if(typeof window.isSecureContext === 'boolean') secure = window.isSecureContext;
-  else secure = (proto === 'https' || host === 'localhost' || host === '127.0.0.1');
-  var standalone = false;
-  try{
-    standalone = window.matchMedia('(display-mode: standalone)').matches ||
-                 window.matchMedia('(display-mode: fullscreen)').matches ||
-                 window.matchMedia('(display-mode: minimal-ui)').matches;
-  }catch(e){}
-  if(window.navigator && window.navigator.standalone) standalone = true;
-  return { proto:proto, host:host, secure:!!secure, standalone:!!standalone,
-           sw: ('serviceWorker' in navigator) && !!secure, canPrompt: !!deferredPrompt };
-}
-function refreshRuntime(){
-  var r = runtimeInfo(), info = $('runStateInfo'), short = r.proto + '://' + r.host;
-  if(r.standalone){
-    info.textContent = '✅ 已作为独立应用运行：全屏、无地址栏' + (r.sw ? '、离线可用' : '');
-    info.style.color = 'var(--inc)';
-  } else if(!r.secure){
-    info.textContent = '⚠️ ' + short + ' 不是安全来源，装不成独立应用（会有地址栏、离线也用不了）→ 点这里看解决办法';
-    info.style.color = 'var(--exp)';
-  } else {
-    info.textContent = '✅ 安全来源，可以装到桌面' + (r.sw ? '、离线可用' : '') + '。用浏览器菜单里的「安装应用」';
-    info.style.color = 'var(--brand)';
-  }
-  $('installBtn').hidden = !r.canPrompt;
-  $('installHint').textContent = r.standalone
-    ? '当前已作为独立应用运行 ✓'
-    : (r.secure ? '提示：用浏览器菜单里的「安装应用」装到桌面，装好后全屏无地址栏。'
-                : '当前地址是 ' + short + '，这种地址只能「添加到主屏幕」当书签用，点开还是带地址栏的标签页。');
-}
-function openRunHelp(){
-  var r = runtimeInfo(), h;
-  if(r.standalone){
-    h = '<div class="note-hint" style="color:var(--fg)">已经作为独立应用运行：全屏、没有地址栏' +
-        (r.sw ? '，断网也能打开。' : '。') + '</div>';
-  } else if(!r.secure){
-    h = '<div class="note-hint" style="color:var(--fg)">' +
-      '<b>为什么会有地址栏？</b><br>' +
-      'Chrome 只允许「安全来源」（https:// 或 localhost）把网页安装成独立应用。' +
-      '你现在用的是 <b>' + esc(r.proto + '://' + r.host) + '</b>，属于不安全来源：' +
-      '浏览器最多只能把它「添加到主屏幕」，那只是一个书签，点开仍是普通标签页，' +
-      '所以地址栏一定在，而且 Service Worker 注册不了，离线也用不了。<br><br>' +
-      '<b>办法一 · 最省事（推荐）</b><br>' +
-      '把 MoneyBook 整个文件夹传到任意免费 HTTPS 静态托管（GitHub Pages / Cloudflare Pages / Netlify Drop 都行），' +
-      '手机打开那个 https 地址，Chrome 菜单里就会出现「安装应用」。' +
-      '装好后是真正的全屏 App，断网也能记账。<br>' +
-      '不用担心里面的账目：数据只存在手机本地，托管方只能看到这个网页本身。<br><br>' +
-      '<b>办法二 · 完全走局域网</b><br>' +
-      '给电脑上的服务器配一张证书，并在手机里信任它，改用 https:// 局域网地址访问，同样能安装。<br><br>' +
-      '<b>办法三 · 有数据线和开发者模式</b><br>' +
-      '用 adb reverse 把电脑端口映射到手机，通过 http://localhost:端口 访问（localhost 算安全来源），也能安装。<br><br>' +
-      '<b>什么都不做也行</b><br>' +
-      '直接在这个标签页里记账完全正常，功能和数据一样，只是顶部一直有地址栏、断网打不开。' +
-      '</div>';
-  } else {
-    h = '<div class="note-hint" style="color:var(--fg)">当前是安全来源，可以安装：<br><br>' +
-        '浏览器右上角菜单 → 「安装应用」/「添加到主屏幕」。<br>' +
-        '装好后从桌面图标打开就是全屏、没有地址栏，断网也能用。</div>';
-  }
-  pending = null;
-  $('panelTitle').textContent = '运行方式';
-  $('panelBody').innerHTML = h;
-  $('panelFoot').hidden = true;
-  $('panel').classList.add('show');
 }
 
 /* ===================== 记账面板 ===================== */
@@ -1420,24 +1321,8 @@ $('csvRow').onclick = function(){
   if(downloadText(backupFileName('csv'), toCSV(), 'text/csv')) toast('CSV 已导出（' + records.length + ' 条）');
 };
 $('snapListRow').onclick = openSnapList;
-$('runStateRow').onclick = openRunHelp;
-$('checkUpdateRow').onclick = checkUpdate;
 $('updateNow').onclick = function(){ location.reload(); };
 $('updateLater').onclick = function(){ $('updateBar').hidden = true; };
-$('installBtn').onclick = function(){
-  if(!deferredPrompt) return;
-  var p = deferredPrompt;
-  deferredPrompt = null;
-  try{ p.prompt(); }catch(e){}
-  if(p.userChoice && p.userChoice.then) p.userChoice.then(function(){ refreshRuntime(); });
-  setTimeout(refreshRuntime, 500);
-};
-window.addEventListener('beforeinstallprompt', function(e){
-  if(e && e.preventDefault) e.preventDefault();
-  deferredPrompt = e;
-  refreshRuntime();
-});
-window.addEventListener('appinstalled', function(){ deferredPrompt = null; refreshRuntime(); toast('已安装到桌面'); });
 $('panelClose').onclick = closePanel;
 $('restoreFileRow').onclick = function(){ $('fileInput').click(); };
 $('fileInput').onchange = function(){
@@ -1510,8 +1395,6 @@ window.addEventListener('popstate', function(){ if($('sheet').classList.contains
 
 /* ===================== 启动 ===================== */
 buildPad();
-$('appVer').textContent = APP_VERSION;
-$('updateInfo').textContent = '当前版本 ' + APP_VERSION + ' · 有新版本会自动提示';
 renderList(); renderStats(); renderMe();
 var hashView = (location.hash || '').replace('#','');
 if(hashView === 'stats' || hashView === 'me') switchView(hashView);
@@ -1527,10 +1410,9 @@ if(cfg.snapOn !== false && records.length && cfg.lastSnap !== todayStr()){
 setTimeout(maybeAutoExport, 1500);
 initSW();
 
-/* service worker（仅在通过 http/https 打开时生效，file:// 下自动跳过） */
 /* service worker：只有安全来源（https / localhost）才允许注册，http 局域网地址会静默失败。
    更新策略：导航请求在 sw.js 里是「网络优先」，所以联网打开一次就能拿到新版 index.html；
-   这里额外做的是——发现新版本时主动提示，以及给一个手动检查的入口。 */
+   这里额外做的是——发现新版本时在底部提示一条「立即更新」。 */
 var swReg = null, hadController = false;
 
 function initSW(){
@@ -1554,14 +1436,6 @@ function initSW(){
 }
 function showUpdateBar(){
   $('updateBar').hidden = false;
-  $('updateInfo').textContent = '有新版本已下载好，点右侧「立即更新」生效';
-}
-function checkUpdate(){
-  if(!swReg){ toast('当前环境不支持自动更新（需要 https 打开并已安装）'); return; }
-  toast('正在检查更新…');
-  swReg.update().then(function(){
-    setTimeout(function(){ if($('updateBar').hidden) toast('已是最新版本'); }, 800);
-  }).catch(function(){ toast('检查失败，请检查网络'); });
 }
 
 /* 自检入口：index.html#selftest */
@@ -1569,7 +1443,7 @@ window.__jz = { toCents:toCents, yuan:yuan, shiftMonth:shiftMonth, monthLabel:mo
                 aggregate:aggregate, sumCents:sumCents, pinHash:pinHash, ymd:ymd, daysInMonth:daysInMonth,
                 buildBackup:buildBackup, toCSV:toCSV, parseBackupText:parseBackupText,
                 normalizeRows:normalizeRows, snapshot:snapshot, loadBackups:loadBackups,
-                runtimeInfo:runtimeInfo, showUpdateBar:showUpdateBar, checkUpdate:checkUpdate, CATS:CATS,
+                showUpdateBar:showUpdateBar, CATS:CATS,
                 evalAmount:evalAmount, amountCents:amountCents, hasOperator:hasOperator };
 
 if(location.hash.indexOf('selftest') >= 0){

@@ -582,59 +582,27 @@ if (app) {
   }
 }
 
-/* =========== 9. 运行方式诊断（为什么有地址栏） =========== */
+/* =========== 9. 「我的」页面结构（1.4.2 起移除运行方式与关于卡片） =========== */
 {
   const seedCfg = { 'jz.config.v1': JSON.stringify({ pin: null, lockDelay: 60000, lastCat: {}, autoExport: 'off' }) };
+  let me = null;
+  step('打开「我的」页', () => { me = runApp({ storageMode: 'ok', seed: seedCfg }); fire(me.els.get('tabbar'), 'click', { view: 'me' }); });
+  if (me) {
+    ok(!/id="runStateRow"/.test(markup), '运行方式入口已移除');
+    ok(!/id="installBtn"/.test(markup), '安装按钮已移除');
+    ok(!/id="checkUpdateRow"/.test(markup), '检查更新入口已移除');
+    ok(!/关于「轻记账」/.test(markup), '关于卡片已移除');
+    ok(!/id="appVer"/.test(markup), '关于卡片里的版本号也已移除');
+    ok(!/runStateInfo|installHint|updateInfo/.test(script), '脚本里不再引用被删掉的元素');
+    ok(!/runtimeInfo|openRunHelp|deferredPrompt|checkUpdate\b/.test(script), '运行方式相关逻辑已清理');
 
-  let lan = null;
-  step('局域网 http 访问', () => { lan = runApp({ storageMode: 'ok', seed: seedCfg, loc: { protocol: 'http:', hostname: '192.168.1.23' } }); });
-  if (lan) {
-    const info = lan.els.get('runStateInfo');
-    ok(/不是安全来源/.test(info.textContent), '识别出局域网 http 不是安全来源', info.textContent.slice(0, 60));
-    ok(/地址栏/.test(info.textContent), '明确说明会有地址栏');
-    ok(/192\.168\.1\.23/.test(info.textContent), '提示里带上当前地址');
-    eq(info.style.color, 'var(--exp)', '用告警色显示');
-    eq(lan.els.get('installBtn').hidden, true, '不可安装时不显示安装按钮');
-    ok(/地址栏/.test(lan.els.get('installHint').textContent), '关于卡片同步说明');
-
-    step('点开运行方式说明', () => {
-      lan.els.get('runStateRow').onclick();
-      eq(lan.els.get('panelTitle').textContent, '运行方式', '面板标题');
-      eq(lan.els.get('panel').classList.contains('show'), true, '面板打开');
-      eq(lan.els.get('panelFoot').hidden, true, '说明页不显示操作按钮');
-      const body = lan.els.get('panelBody').innerHTML;
-      ok(/https:\/\//.test(body), '给出了 HTTPS 解决办法');
-      ok(/GitHub Pages|Cloudflare|Netlify/.test(body), '给出了具体的静态托管方案');
-      ok(/localhost/.test(body), '说明了 localhost 也算安全来源');
-      ok(/为什么/.test(body), '解释了原因');
-    });
+    // 保留下来的卡片必须还在
+    ok(/id="meBalance"/.test(markup), '总结余卡片保留');
+    ok(/id="snapSwitch"/.test(markup), '自动快照设置保留');
+    ok(/id="pinSwitch"/.test(markup), '密码锁设置保留');
+    ok(/id="clearRow"/.test(markup), '清空数据保留');
+    eq(me.els.get('meBalance').textContent, '¥0.00', '总结余仍正常渲染');
   }
-
-  let tls = null;
-  step('https 访问', () => { tls = runApp({ storageMode: 'ok', seed: seedCfg, loc: { protocol: 'https:', hostname: 'me.github.io' }, secureContext: true }); });
-  if (tls) {
-    const info = tls.els.get('runStateInfo');
-    ok(/安全来源/.test(info.textContent), 'https 识别为安全来源', info.textContent.slice(0, 60));
-    eq(info.style.color, 'var(--brand)', '用品牌色显示');
-    ok(/安装应用/.test(info.textContent), '提示去菜单里安装');
-  }
-
-  let inst = null;
-  step('已安装（standalone）', () => {
-    inst = runApp({ storageMode: 'ok', seed: seedCfg, loc: { protocol: 'https:', hostname: 'me.github.io' },
-                    secureContext: true, standalone: true });
-  });
-  if (inst) {
-    const info = inst.els.get('runStateInfo');
-    ok(/已作为独立应用运行/.test(info.textContent), '识别出已在独立应用里运行', info.textContent.slice(0, 60));
-    ok(/无地址栏/.test(info.textContent), '确认没有地址栏');
-    eq(info.style.color, 'var(--inc)', '用正常色显示');
-    ok(/独立应用运行/.test(inst.els.get('installHint').textContent), '关于卡片同步更新');
-  }
-
-  let local = null;
-  step('localhost 访问', () => { local = runApp({ storageMode: 'ok', seed: seedCfg, loc: { protocol: 'http:', hostname: 'localhost' } }); });
-  if (local) ok(/安全来源/.test(local.els.get('runStateInfo').textContent), 'localhost 被当作安全来源');
 }
 
 /* =========== 10. 部署一致性（托管平台上最容易踩的坑） =========== */
@@ -706,19 +674,14 @@ if (app) {
   if (up) {
     const e = up.els;
     eq(e.get('updateBar').hidden, true, '默认不显示更新提示条');
-    ok(/有新版本会自动提示/.test(markup) && /id="checkUpdateRow"/.test(markup), '设置页有「检查更新」入口');
-    ok(/当前版本 \d+\.\d+\.\d+/.test(e.get('updateInfo').textContent), '显示当前版本号，方便确认更新是否生效', e.get('updateInfo').textContent);
-    const verConst = (script.match(/var APP_VERSION = '([^']+)'/) || [])[1];
-    ok(!!verConst, 'index.html 里有 APP_VERSION 常量');
-    eq(e.get('appVer').textContent, verConst, '关于页显示同一个版本号');
+    ok(!!(script.match(/var APP_VERSION = '([^']+)'/) || [])[1], 'index.html 里有 APP_VERSION 常量');
 
     const jz = up.windowShim.__jz;
     ok(typeof jz.showUpdateBar === 'function', '暴露了 showUpdateBar');
-    ok(typeof jz.checkUpdate === 'function', '暴露了 checkUpdate');
 
     step('发现新版本', () => jz.showUpdateBar());
     eq(e.get('updateBar').hidden, false, '提示条出现');
-    ok(/新版本已下载好/.test(e.get('updateInfo').textContent), '提示条文案更新');
+    ok(/发现新版本/.test(markup) && /id="updateNow"/.test(markup), '提示条有「立即更新」按钮');
 
     step('点「立即更新」会重新加载页面', () => e.get('updateNow').onclick());
     eq(up.locationShim.reloadCount, 1, '调用了 location.reload()（数据不会因此丢失）');
@@ -727,11 +690,6 @@ if (app) {
       jz.showUpdateBar();
       e.get('updateLater').onclick();
       eq(e.get('updateBar').hidden, true, '提示条被关掉');
-    });
-
-    step('手动检查更新（非 https 环境）', () => {
-      e.get('checkUpdateRow').onclick();
-      ok(/不支持自动更新/.test(e.get('toast').textContent), '给出明确提示', e.get('toast').textContent);
     });
   }
 }
