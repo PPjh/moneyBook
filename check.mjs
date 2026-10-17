@@ -582,7 +582,7 @@ if (app) {
   }
 }
 
-/* =========== 9. 「我的」页面结构（1.4.2 起移除运行方式与关于卡片） =========== */
+/* =========== 9. 「我的」页面结构（移除运行方式/关于卡片，但保留版本号） =========== */
 {
   const seedCfg = { 'jz.config.v1': JSON.stringify({ pin: null, lockDelay: 60000, lastCat: {}, autoExport: 'off' }) };
   let me = null;
@@ -592,9 +592,16 @@ if (app) {
     ok(!/id="installBtn"/.test(markup), '安装按钮已移除');
     ok(!/id="checkUpdateRow"/.test(markup), '检查更新入口已移除');
     ok(!/关于「轻记账」/.test(markup), '关于卡片已移除');
-    ok(!/id="appVer"/.test(markup), '关于卡片里的版本号也已移除');
     ok(!/runStateInfo|installHint|updateInfo/.test(script), '脚本里不再引用被删掉的元素');
     ok(!/runtimeInfo|openRunHelp|deferredPrompt|checkUpdate\b/.test(script), '运行方式相关逻辑已清理');
+
+    // 版本号必须还能在界面上看到（只保留这一行，不恢复整块「关于」）
+    ok(/id="appVer"/.test(markup), '界面保留版本号');
+    ok(/class="verline"/.test(markup), '版本号以独立小字行呈现');
+    const verConst = (script.match(/var APP_VERSION = '([^']+)'/) || [])[1];
+    ok(!!verConst, 'index.html 里有 APP_VERSION 常量');
+    eq(me.els.get('appVer').textContent, verConst, '界面版本号与 APP_VERSION 一致（不会两处写死对不上）');
+    ok(/轻记账[\s\S]{0,30}id="appVer"/.test(markup), '版本行带应用名');
 
     // 保留下来的卡片必须还在
     ok(/id="meBalance"/.test(markup), '总结余卡片保留');
