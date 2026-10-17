@@ -201,6 +201,16 @@ body[data-view="stats"] .fab,body[data-view="me"] .fab{display:none}
 .amount-row .cny{font-size:24px;font-weight:600;color:var(--muted)}
 .amount-row input{flex:1;font-size:34px;font-weight:700;letter-spacing:-.5px;font-variant-numeric:tabular-nums;min-width:0;padding:2px 0}
 .amount-row input::placeholder{color:var(--line);font-weight:600}
+.amount-row .calc{flex:0 0 auto;font-size:15px;font-weight:650;color:var(--brand);
+  font-variant-numeric:tabular-nums;white-space:nowrap}
+/* 运算符条：手机数字键盘打不出 + − × ÷，所以单独给一排按钮 */
+.opbar{display:flex;align-items:center;gap:8px;margin-top:9px}
+.opbar button{flex:0 0 44px;height:40px;border-radius:12px;background:var(--card);box-shadow:var(--shadow);
+  font-size:18px;font-weight:650;color:var(--fg);display:grid;place-items:center;line-height:1}
+.opbar button:active{background:var(--brand-soft)}
+.opbar button.eq{background:var(--brand);color:var(--brand-fg);box-shadow:0 3px 10px rgba(15,118,110,.28)}
+.opbar-hint{flex:1;min-width:0;text-align:right;font-size:11.5px;color:var(--muted);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .field-label{font-size:13px;color:var(--muted);margin:16px 4px 8px;font-weight:550}
 .cats{display:grid;grid-template-columns:repeat(5,1fr);gap:8px}
 .cat{background:var(--card);border-radius:13px;padding:9px 2px 7px;display:flex;flex-direction:column;align-items:center;gap:3px;
@@ -404,7 +414,7 @@ body[data-view="stats"] .fab,body[data-view="me"] .fab{display:none}
       <div class="card">
         <div style="font-size:15px;font-weight:650;margin-bottom:6px">关于「轻记账」</div>
         <div style="font-size:13px;color:var(--muted);line-height:1.75">
-          版本 <span id="appVer">1.3.0</span> · 单文件 · 完全离线<br>
+          版本 <span id="appVer">1.4.0</span> · 单文件 · 完全离线<br>
           所有数据只保存在本机浏览器里，不上传任何服务器。<br>
           卸载应用或清除浏览器数据会一并删除流水，请谨慎操作。<br>
           <span id="installHint"></span>
@@ -437,6 +447,15 @@ body[data-view="stats"] .fab,body[data-view="me"] .fab{display:none}
     <div class="amount-row">
       <span class="cny">¥</span>
       <input id="amt" type="text" inputmode="decimal" placeholder="0.00" autocomplete="off" enterkeyhint="done">
+      <span class="calc" id="calcPreview" hidden>= 0.00</span>
+    </div>
+    <div class="opbar" id="opbar">
+      <button data-op="+" aria-label="加">＋</button>
+      <button data-op="-" aria-label="减">−</button>
+      <button data-op="*" aria-label="乘">×</button>
+      <button data-op="/" aria-label="除">÷</button>
+      <button data-op="=" class="eq" aria-label="算出结果">＝</button>
+      <span class="opbar-hint" id="opbarHint">可直接输入 12.5+3.8</span>
     </div>
     <div class="field-label">选择分类</div>
     <div class="cats" id="cats"></div>
@@ -520,7 +539,7 @@ var PALETTE = ['#0d9488','#f59e0b','#6366f1','#ef4444','#10b981','#8b5cf6','#ec4
 var WEEK = ['日','一','二','三','四','五','六'];
 var TYPE_NAME = { expense:'支出', income:'收入' };
 /* 改完功能把这里 +1，就能在手机「我的 → 检查更新」里一眼确认更新到底生效没有 */
-var APP_VERSION = '1.3.0';
+var APP_VERSION = '1.4.0';
 
 function $(id){ return document.getElementById(id); }
 function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, function(c){
@@ -529,6 +548,65 @@ function toCents(v){
   if(typeof v === 'number'){ return Math.round(v); }
   var n = parseFloat(String(v==null?'':v).replace(/[^\d.\-]/g,''));
   return isFinite(n) ? Math.round(n*100) : 0;
+}
+
+/* ---- 金额算式求值：支持 + − × ÷ 与括号，不用 eval，非法输入返回 null ---- */
+function evalAmount(text){
+  var s = String(text == null ? '' : text)
+    .replace(/[×✕xX]/g, '*').replace(/[÷]/g, '/')
+    .replace(/[＋]/g, '+').replace(/[－−–]/g, '-')
+    .replace(/\s+/g, '');
+  if(!s) return null;
+  var i = 0;
+  function number(){
+    var m = /^\d+(\.\d*)?|^\.\d+/.exec(s.slice(i));
+    if(!m) return null;
+    i += m[0].length;
+    return parseFloat(m[0]);
+  }
+  function factor(){
+    if(s.charAt(i) === '('){
+      i++;
+      var v = expr();
+      if(s.charAt(i) !== ')') return null;
+      i++;
+      return v;
+    }
+    if(s.charAt(i) === '-'){ i++; var w = factor(); return w == null ? null : -w; }
+    if(s.charAt(i) === '+'){ i++; return factor(); }
+    return number();
+  }
+  function term(){
+    var v = factor();
+    if(v == null) return null;
+    while(s.charAt(i) === '*' || s.charAt(i) === '/'){
+      var op = s.charAt(i++), r = factor();
+      if(r == null) return null;
+      if(op === '*') v = v * r;
+      else { if(r === 0) return null; v = v / r; }
+    }
+    return v;
+  }
+  function expr(){
+    var v = term();
+    if(v == null) return null;
+    while(s.charAt(i) === '+' || s.charAt(i) === '-'){
+      var op = s.charAt(i++), r = term();
+      if(r == null) return null;
+      v = op === '+' ? v + r : v - r;
+    }
+    return v;
+  }
+  var out = expr();
+  if(out == null || i !== s.length || !isFinite(out)) return null;
+  return out;
+}
+function hasOperator(text){ return /[+\-*/()]/.test(String(text == null ? '' : text)); }
+/* 输入框最终要记录的金额（分）；算式不完整、结果为 0 或负数都返回 null */
+function amountCents(){
+  var v = evalAmount($('amt').value);
+  if(v == null || !(v > 0)) return null;
+  return Math.round(v * 100);
 }
 function yuan(c){
   c = Math.round(c||0);
@@ -1105,8 +1183,23 @@ function openEntry(rec){
   $('sheetTitle').textContent = rec ? '编辑记录' : '记一笔';
   $('sheetDelete').hidden = !rec;
   buildCats();
+  updateCalc();
   $('sheet').classList.add('show');
   if(!rec) setTimeout(function(){ $('amt').focus(); }, 280);
+}
+/* 算式实时预览：有运算符时显示 =结果，没有运算符就把提示还回来 */
+function updateCalc(){
+  var raw = $('amt').value, pv = $('calcPreview'), hint = $('opbarHint');
+  if(!hasOperator(raw)){
+    pv.hidden = true; pv.textContent = '';
+    hint.hidden = false; hint.textContent = '可输入 12.5+3.8';
+    return;
+  }
+  hint.hidden = true;
+  pv.hidden = false;
+  var v = evalAmount(raw);
+  if(v == null){ pv.textContent = '不完整'; pv.style.color = 'var(--exp)'; }
+  else { pv.textContent = '= ' + (Math.round(v*100)/100).toFixed(2); pv.style.color = 'var(--brand)'; }
 }
 function closeEntry(){
   $('sheet').classList.remove('show');
@@ -1114,8 +1207,12 @@ function closeEntry(){
   if(document.activeElement && document.activeElement.blur) document.activeElement.blur();
 }
 function saveEntry(){
-  var cents = toCents($('amt').value);
-  if(cents <= 0){ toast('请输入大于 0 的金额'); $('amt').focus(); return; }
+  var cents = amountCents();
+  if(cents == null){
+    toast(hasOperator($('amt').value) ? '算式不完整，或结果不为正数' : '请输入大于 0 的金额');
+    $('amt').focus();
+    return;
+  }
   var date = $('date').value || todayStr();
   if(!/^\d{4}-\d{2}-\d{2}$/.test(date)) date = todayStr();
   var note = $('note').value.trim().slice(0, 40);
@@ -1294,13 +1391,26 @@ $('cats').addEventListener('click', function(e){
   document.querySelectorAll('#cats .cat').forEach(function(x){ x.classList.toggle('on', x === b); });
 });
 $('amt').addEventListener('input', function(){
-  var v = this.value.replace(/[^\d.]/g, '');
-  var i = v.indexOf('.');
-  if(i >= 0) v = v.slice(0, i+1) + v.slice(i+1).replace(/\./g, '');
-  if(i >= 0) v = v.slice(0, i+3);
-  v = v.replace(/^0+(\d)/, '$1');
-  if(v.length > 10) v = v.slice(0, 10);
+  var v = String(this.value).replace(/[^0-9.+\-*/()]/g, '');
+  if(v.length > 40) v = v.slice(0, 40);
   this.value = v;
+  updateCalc();
+});
+$('opbar').addEventListener('click', function(e){
+  var b = e.target.closest('button[data-op]');
+  if(!b) return;
+  var op = b.dataset.op, el = $('amt'), cur = el.value;
+  if(op === '='){
+    var v = evalAmount(cur);
+    if(v == null){ toast('算式不完整'); return; }
+    el.value = (Math.round(v*100)/100).toFixed(2);
+    updateCalc();
+    return;
+  }
+  if(/[+\-*/]$/.test(cur)) el.value = cur.slice(0, -1) + op;   // 连按运算符时替换，避免 12++
+  else if(cur) el.value = cur + op;
+  else return;                                                  // 空输入时不让运算符开头
+  updateCalc();
 });
 $('amt').addEventListener('keydown', function(e){ if(e.key === 'Enter'){ this.blur(); saveEntry(); } });
 $('statSeg').addEventListener('click', function(e){
@@ -1496,7 +1606,8 @@ window.__jz = { toCents:toCents, yuan:yuan, shiftMonth:shiftMonth, monthLabel:mo
                 aggregate:aggregate, sumCents:sumCents, pinHash:pinHash, ymd:ymd, daysInMonth:daysInMonth,
                 buildBackup:buildBackup, toCSV:toCSV, parseBackupText:parseBackupText,
                 normalizeRows:normalizeRows, snapshot:snapshot, loadBackups:loadBackups,
-                runtimeInfo:runtimeInfo, showUpdateBar:showUpdateBar, checkUpdate:checkUpdate, CATS:CATS };
+                runtimeInfo:runtimeInfo, showUpdateBar:showUpdateBar, checkUpdate:checkUpdate, CATS:CATS,
+                evalAmount:evalAmount, amountCents:amountCents, hasOperator:hasOperator };
 
 if(location.hash.indexOf('selftest') >= 0){
   var pass = 0, fail = [];

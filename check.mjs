@@ -121,6 +121,8 @@ function fire(el, type, dataset) {
   h({ target: t });
 }
 const fireDoc = (app, type) => { const h = app.docHandlers[type]; if (h) h(); };
+/** 触发 addEventListener('input') 的处理器（内部用 this.value） */
+function fireInput(el) { if (el._h && el._h.input) el._h.input.call(el); }
 
 /* ---------------- 断言 ---------------- */
 let pass = 0;
@@ -795,6 +797,110 @@ if (app) {
   if (empty) {
     eq(empty.els.get('meBalance').textContent, '¥0.00', '空账本总结余 0');
     eq(empty.els.get('meBalance').style.color, 'var(--muted)', '空账本用中性色');
+  }
+}
+
+/* =========== 13. 金额算式（记账时直接加减乘除） =========== */
+{
+  const probe = runApp({ storageMode: 'ok', seed: {} });
+  const ev = probe.windowShim.__jz.evalAmount;
+  const close = (a, b, name) => ok(typeof a === 'number' && Math.abs(a - b) < 1e-9, name, a + ' vs ' + b);
+
+  close(ev('12.5+3.8'), 16.3, '加法');
+  close(ev('100-25'), 75, '减法');
+  close(ev('2*3+4'), 10, '乘加优先级');
+  close(ev('10/4'), 2.5, '除法');
+  close(ev('(1+2)*3'), 9, '括号');
+  close(ev('1.5+2.25'), 3.75, '多位小数');
+  close(ev('12.5 + 3.8'), 16.3, '忽略空格');
+  close(ev('6×7'), 42, '全角乘号');
+  close(ev('8÷2'), 4, '全角除号');
+  close(ev('20－5'), 15, '全角减号');
+  close(ev('-5+10'), 5, '一元负号');
+  close(ev('.5+.5'), 1, '省略整数部分');
+  close(ev('0.1+0.2'), 0.3, '浮点累加不出偏差');
+  eq(ev(''), null, '空串返回 null');
+  eq(ev('12+'), null, '末尾缺操作数');
+  eq(ev('10/0'), null, '除以零被拒绝');
+  eq(ev('abc'), null, '非法字符');
+  eq(ev('1.2.3'), null, '多个小数点');
+  eq(ev('(1+2'), null, '括号不闭合');
+  eq(ev('*5'), null, '运算符开头');
+
+  let ui = null;
+  step('算式记账界面', () => { ui = runApp({ storageMode: 'ok', seed: {} }); });
+  if (ui) {
+    const e = ui.els;
+    e.get('fab').onclick();
+    eq(e.get('calcPreview').hidden, true, '没有运算符时不显示预览');
+
+    step('输入算式', () => {
+      e.get('amt').value = '12.5+3.8';
+      fireInput(e.get('amt'));
+    });
+    eq(e.get('calcPreview').hidden, false, '出现算式预览');
+    eq(e.get('calcPreview').textContent, '= 16.30', '预览显示计算结果', e.get('calcPreview').textContent);
+    eq(e.get('opbarHint').hidden, true, '有算式时提示文字让位');
+
+    step('保存算式结果', () => e.get('sheetSave').onclick());
+    eq(recs(ui).length, 1, '记录已保存');
+    eq(recs(ui)[0] && recs(ui)[0].amount, 1630, '存的是计算结果 1630 分');
+
+    step('运算符按钮', () => {
+      const el = e.get('amt');
+      el.value = '100';
+      fire(e.get('opbar'), 'click', { op: '-' });
+      eq(el.value, '100-', '点击减号追加');
+      fire(e.get('opbar'), 'click', { op: '+' });
+      eq(el.value, '100+', '连按运算符是替换而不是叠加');
+      el.value = '';
+      fire(e.get('opbar'), 'click', { op: '+' });
+      eq(el.value, '', '空输入时不接受运算符开头');
+    });
+
+    step('等号把算式并成结果', () => {
+      const el = e.get('amt');
+      el.value = '100-25';
+      fire(e.get('opbar'), 'click', { op: '=' });
+      eq(el.value, '75.00', '按等号后输入框变成结果');
+    });
+
+    step('非法字符被过滤', () => {
+      const el = e.get('amt');
+      el.value = '12元+3块';
+      fireInput(el);
+      eq(el.value, '12+3', '只保留数字和运算符');
+    });
+
+    step('算式不完整时拒绝保存', () => {
+      const before = recs(ui).length;
+      e.get('amt').value = '12+';
+      fireInput(e.get('amt'));
+      eq(e.get('calcPreview').textContent, '不完整', '预览提示不完整');
+      e.get('sheetSave').onclick();
+      eq(recs(ui).length, before, '没有新增记录');
+      ok(/算式不完整/.test(e.get('toast').textContent), '给出明确提示', e.get('toast').textContent);
+    });
+
+    step('结果为负数或零也拒绝', () => {
+      const before = recs(ui).length;
+      e.get('amt').value = '5-5';
+      fireInput(e.get('amt'));
+      eq(e.get('calcPreview').textContent, '= 0.00', '预览会显示 0.00');
+      e.get('sheetSave').onclick();
+      eq(recs(ui).length, before, '0 元不记账');
+    });
+
+    step('普通金额照旧可用', () => {
+      const el = e.get('amt');
+      el.value = '38.50';
+      fireInput(el);
+      eq(e.get('calcPreview').hidden, true, '纯数字不显示预览');
+      const before = recs(ui).length;
+      e.get('sheetSave').onclick();
+      eq(recs(ui).length, before + 1, '纯数字保存成功');
+      eq(recs(ui)[recs(ui).length - 1].amount, 3850, '金额正确');
+    });
   }
 }
 
