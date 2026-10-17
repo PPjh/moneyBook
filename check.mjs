@@ -840,30 +840,15 @@ if (app) {
     });
     eq(e.get('calcPreview').hidden, false, '出现算式预览');
     eq(e.get('calcPreview').textContent, '= 16.30', '预览显示计算结果', e.get('calcPreview').textContent);
-    eq(e.get('opbarHint').hidden, true, '有算式时提示文字让位');
 
     step('保存算式结果', () => e.get('sheetSave').onclick());
     eq(recs(ui).length, 1, '记录已保存');
     eq(recs(ui)[0] && recs(ui)[0].amount, 1630, '存的是计算结果 1630 分');
 
-    step('运算符按钮', () => {
-      const el = e.get('amt');
-      el.value = '100';
-      fire(e.get('opbar'), 'click', { op: '-' });
-      eq(el.value, '100-', '点击减号追加');
-      fire(e.get('opbar'), 'click', { op: '+' });
-      eq(el.value, '100+', '连按运算符是替换而不是叠加');
-      el.value = '';
-      fire(e.get('opbar'), 'click', { op: '+' });
-      eq(el.value, '', '空输入时不接受运算符开头');
-    });
-
-    step('等号把算式并成结果', () => {
-      const el = e.get('amt');
-      el.value = '100-25';
-      fire(e.get('opbar'), 'click', { op: '=' });
-      eq(el.value, '75.00', '按等号后输入框变成结果');
-    });
+    // 按需求移除：运算符按钮条与 12.5+3.8 提示都不应再出现在界面上
+    ok(!/id="opbar"/.test(markup), '运算符按钮条已移除');
+    ok(!/opbar-hint|可直接输入 12\.5\+3\.8/.test(markup), '「12.5+3.8」提示文案已移除');
+    ok(!/opbar-hint/.test(script), '脚本里不再引用提示元素');
 
     step('非法字符被过滤', () => {
       const el = e.get('amt');

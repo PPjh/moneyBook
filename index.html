@@ -203,14 +203,6 @@ body[data-view="stats"] .fab,body[data-view="me"] .fab{display:none}
 .amount-row input::placeholder{color:var(--line);font-weight:600}
 .amount-row .calc{flex:0 0 auto;font-size:15px;font-weight:650;color:var(--brand);
   font-variant-numeric:tabular-nums;white-space:nowrap}
-/* 运算符条：手机数字键盘打不出 + − × ÷，所以单独给一排按钮 */
-.opbar{display:flex;align-items:center;gap:8px;margin-top:9px}
-.opbar button{flex:0 0 44px;height:40px;border-radius:12px;background:var(--card);box-shadow:var(--shadow);
-  font-size:18px;font-weight:650;color:var(--fg);display:grid;place-items:center;line-height:1}
-.opbar button:active{background:var(--brand-soft)}
-.opbar button.eq{background:var(--brand);color:var(--brand-fg);box-shadow:0 3px 10px rgba(15,118,110,.28)}
-.opbar-hint{flex:1;min-width:0;text-align:right;font-size:11.5px;color:var(--muted);
-  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .field-label{font-size:13px;color:var(--muted);margin:16px 4px 8px;font-weight:550}
 .cats{display:grid;grid-template-columns:repeat(5,1fr);gap:8px}
 .cat{background:var(--card);border-radius:13px;padding:9px 2px 7px;display:flex;flex-direction:column;align-items:center;gap:3px;
@@ -414,7 +406,7 @@ body[data-view="stats"] .fab,body[data-view="me"] .fab{display:none}
       <div class="card">
         <div style="font-size:15px;font-weight:650;margin-bottom:6px">关于「轻记账」</div>
         <div style="font-size:13px;color:var(--muted);line-height:1.75">
-          版本 <span id="appVer">1.4.0</span> · 单文件 · 完全离线<br>
+          版本 <span id="appVer">1.4.1</span> · 单文件 · 完全离线<br>
           所有数据只保存在本机浏览器里，不上传任何服务器。<br>
           卸载应用或清除浏览器数据会一并删除流水，请谨慎操作。<br>
           <span id="installHint"></span>
@@ -448,14 +440,6 @@ body[data-view="stats"] .fab,body[data-view="me"] .fab{display:none}
       <span class="cny">¥</span>
       <input id="amt" type="text" inputmode="decimal" placeholder="0.00" autocomplete="off" enterkeyhint="done">
       <span class="calc" id="calcPreview" hidden>= 0.00</span>
-    </div>
-    <div class="opbar" id="opbar">
-      <button data-op="+" aria-label="加">＋</button>
-      <button data-op="-" aria-label="减">−</button>
-      <button data-op="*" aria-label="乘">×</button>
-      <button data-op="/" aria-label="除">÷</button>
-      <button data-op="=" class="eq" aria-label="算出结果">＝</button>
-      <span class="opbar-hint" id="opbarHint">可直接输入 12.5+3.8</span>
     </div>
     <div class="field-label">选择分类</div>
     <div class="cats" id="cats"></div>
@@ -539,7 +523,7 @@ var PALETTE = ['#0d9488','#f59e0b','#6366f1','#ef4444','#10b981','#8b5cf6','#ec4
 var WEEK = ['日','一','二','三','四','五','六'];
 var TYPE_NAME = { expense:'支出', income:'收入' };
 /* 改完功能把这里 +1，就能在手机「我的 → 检查更新」里一眼确认更新到底生效没有 */
-var APP_VERSION = '1.4.0';
+var APP_VERSION = '1.4.1';
 
 function $(id){ return document.getElementById(id); }
 function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, function(c){
@@ -1187,15 +1171,10 @@ function openEntry(rec){
   $('sheet').classList.add('show');
   if(!rec) setTimeout(function(){ $('amt').focus(); }, 280);
 }
-/* 算式实时预览：有运算符时显示 =结果，没有运算符就把提示还回来 */
+/* 算式实时预览：输入里出现运算符时，在旁边显示 =结果 */
 function updateCalc(){
-  var raw = $('amt').value, pv = $('calcPreview'), hint = $('opbarHint');
-  if(!hasOperator(raw)){
-    pv.hidden = true; pv.textContent = '';
-    hint.hidden = false; hint.textContent = '可输入 12.5+3.8';
-    return;
-  }
-  hint.hidden = true;
+  var raw = $('amt').value, pv = $('calcPreview');
+  if(!hasOperator(raw)){ pv.hidden = true; pv.textContent = ''; return; }
   pv.hidden = false;
   var v = evalAmount(raw);
   if(v == null){ pv.textContent = '不完整'; pv.style.color = 'var(--exp)'; }
@@ -1394,22 +1373,6 @@ $('amt').addEventListener('input', function(){
   var v = String(this.value).replace(/[^0-9.+\-*/()]/g, '');
   if(v.length > 40) v = v.slice(0, 40);
   this.value = v;
-  updateCalc();
-});
-$('opbar').addEventListener('click', function(e){
-  var b = e.target.closest('button[data-op]');
-  if(!b) return;
-  var op = b.dataset.op, el = $('amt'), cur = el.value;
-  if(op === '='){
-    var v = evalAmount(cur);
-    if(v == null){ toast('算式不完整'); return; }
-    el.value = (Math.round(v*100)/100).toFixed(2);
-    updateCalc();
-    return;
-  }
-  if(/[+\-*/]$/.test(cur)) el.value = cur.slice(0, -1) + op;   // 连按运算符时替换，避免 12++
-  else if(cur) el.value = cur + op;
-  else return;                                                  // 空输入时不让运算符开头
   updateCalc();
 });
 $('amt').addEventListener('keydown', function(e){ if(e.key === 'Enter'){ this.blur(); saveEntry(); } });
