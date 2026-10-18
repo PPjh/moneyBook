@@ -1,7 +1,7 @@
 /* 轻记账 · 打包（零依赖）
    用法： node build.mjs
-   产出： dist/ —— 只含部署必需的 6 个文件，可直接拖到 GitHub Pages / Cloudflare Pages / Netlify Drop */
-import { mkdirSync, copyFileSync, writeFileSync, rmSync, existsSync, statSync } from 'node:fs';
+   产出： dist/ —— 6 个应用文件 + .nojekyll，可用于静态托管 */
+import { mkdirSync, copyFileSync, writeFileSync, rmSync, existsSync, statSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -17,6 +17,16 @@ const FILES = [
   'icon-512.png',
   'icon-maskable-512.png'
 ];
+
+// 先验证输入再更新生成目录，缺少文件时保留上一次打包结果。
+for (const f of FILES) {
+  if (!existsSync(join(DIR, f))) { console.error('✗ 缺少文件：' + f); process.exit(1); }
+}
+const appVersion = readFileSync(join(DIR, 'index.html'), 'utf8').match(/var APP_VERSION = '([^']+)'/);
+const swVersion = readFileSync(join(DIR, 'sw.js'), 'utf8').match(/const VERSION = CACHE_PREFIX \+ '([^']+)'/);
+if (!appVersion || !swVersion || appVersion[1] !== swVersion[1]) {
+  console.error('✗ 应用版本与离线缓存版本不一致，请同步后重试'); process.exit(1);
+}
 
 rmSync(DIST, { recursive: true, force: true });
 mkdirSync(DIST, { recursive: true });
@@ -34,7 +44,7 @@ for (const f of FILES) {
 /* 让 GitHub Pages 跳过 Jekyll 处理：更快，也免得被模板语法误伤 */
 writeFileSync(join(DIST, '.nojekyll'), '');
 
-console.log(`\n✓ dist/ 已生成，共 ${FILES.length + 1} 个文件、${total.toFixed(1)} KB\n`);
+console.log(`\n✓ ${appVersion[1]} · dist/ 已生成，共 ${FILES.length + 1} 个文件、${total.toFixed(1)} KB\n`);
 console.log('接下来：');
 console.log('  · GitHub Pages   → 新建仓库 → 把 dist 里的文件拖进上传页 → Settings / Pages / 选 main 分支');
 console.log('  · Cloudflare Pages 或 Netlify Drop → 直接把 dist 文件夹拖进去');

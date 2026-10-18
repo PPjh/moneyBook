@@ -3,6 +3,9 @@
 # 所以 dist/ 不必提交；它只在你用 Cloudflare Pages / Netlify Drop
 # 拖文件夹部署时才需要，本地跑 node build.mjs 生成即可。
 dist/
+node_modules/
+playwright-report/
+test-results/
 
 # ---- 临时文件 ----
 _*.mjs

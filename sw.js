@@ -1,7 +1,6 @@
-/* 轻记账 · Service Worker
-   策略：应用外壳缓存优先（离线可用），后台静默更新。
-   改了 index.html 之后，把下面的版本号 +1 即可让手机端拿到新版本。 */
-const VERSION = 'jz-v3';
+/* 轻记账 · 导航网络优先，静态资源缓存优先。按应用路径隔离缓存。 */
+const CACHE_PREFIX = 'jz-' + self.registration.scope;
+const VERSION = CACHE_PREFIX + '1.5.0';
 const ASSETS = [
   './',
   './index.html',
@@ -14,7 +13,8 @@ const ASSETS = [
 self.addEventListener('install', (e) => {
   e.waitUntil(
     caches.open(VERSION)
-      .then((c) => Promise.all(ASSETS.map((u) => c.add(new Request(u, { cache: 'reload' })).catch(() => null))))
+      // 任一外壳文件失败则保留旧版本，不激活不完整的离线缓存。
+      .then((c) => c.addAll(ASSETS.map((u) => new Request(u, { cache: 'reload' }))))
       .then(() => self.skipWaiting())
   );
 });
@@ -22,7 +22,7 @@ self.addEventListener('install', (e) => {
 self.addEventListener('activate', (e) => {
   e.waitUntil(
     caches.keys()
-      .then((keys) => Promise.all(keys.filter((k) => k !== VERSION).map((k) => caches.delete(k))))
+      .then((keys) => Promise.all(keys.filter((k) => k.startsWith(CACHE_PREFIX) && k !== VERSION).map((k) => caches.delete(k))))
       .then(() => self.clients.claim())
   );
 });
@@ -42,23 +42,27 @@ self.addEventListener('fetch', (e) => {
       // 手机仍然拿到旧版 index.html，让人误以为更新失败。
       fetch(req, { cache: 'no-cache' })
         .then((res) => {
+          if(!res.ok) throw new Error('页面暂不可用');
           const cp = res.clone();
-          caches.open(VERSION).then((c) => c.put('./index.html', cp)).catch(() => {});
+          e.waitUntil(caches.open(VERSION).then((c) => c.put('./index.html', cp)).catch(() => {}));
           return res;
         })
-        .catch(() => caches.match('./index.html', { ignoreSearch: true }).then((r) => r || caches.match('./')))
+        .catch(() => caches.match('./index.html', { ignoreSearch: true, cacheName: VERSION })
+          .then((r) => r || caches.match('./', { cacheName: VERSION }))
+          .then((r) => r || new Response('暂时无法打开，请联网后重试。', { status:503, headers:{ 'Content-Type':'text/plain; charset=utf-8' } })))
     );
     return;
   }
 
-  // 静态资源：缓存优先
+  // 仅缓存应用自身的静态资源，不缓存同域下其他站点或任意请求。
+  if(!ASSETS.some((asset) => new URL(asset, self.registration.scope).pathname === url.pathname)) return;
   e.respondWith(
-    caches.match(req, { ignoreSearch: true }).then((hit) => {
+    caches.match(req, { ignoreSearch: true, cacheName: VERSION }).then((hit) => {
       if (hit) return hit;
       return fetch(req).then((res) => {
         if (res && res.status === 200 && res.type === 'basic') {
           const cp = res.clone();
-          caches.open(VERSION).then((c) => c.put(req, cp)).catch(() => {});
+          e.waitUntil(caches.open(VERSION).then((c) => c.put(req, cp)).catch(() => {}));
         }
         return res;
       });

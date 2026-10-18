@@ -6,6 +6,7 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { runInNewContext } from 'node:vm';
 
 const DIR = dirname(fileURLToPath(import.meta.url));
 const html = readFileSync(join(DIR, 'index.html'), 'utf8');
@@ -39,7 +40,7 @@ function makeEl(id) {
       toggle: (c, f) => { const on = f === undefined ? !cls.has(c) : !!f; on ? cls.add(c) : cls.delete(c); return on; }
     },
     addEventListener(type, fn) { this._h[type] = fn; },
-    setAttribute() {}, focus() {}, blur() {}, appendChild() {},
+    setAttribute() {}, removeAttribute() {}, focus() {}, blur() {}, appendChild() {},
     closest() { return null; }, querySelectorAll() { return []; }
   };
 }
@@ -58,7 +59,7 @@ function makeStorage(mode, seed) {
   return {
     _map: box,
     getItem(k) { return box.has(k) ? box.get(k) : null; },
-    setItem(k, v) { box.set(k, String(v)); },
+    setItem(k, v) { if(this.failWrites) throw new Error('quota exceeded'); box.set(k, String(v)); },
     removeItem(k) { box.delete(k); }
   };
 }
@@ -81,6 +82,7 @@ function runApp({ storageMode = 'ok', seed = {}, hash = '', loc = {}, standalone
 
   const documentShim = {
     title: '', hidden: false,
+    documentElement: { dataset:{} },
     body: { dataset: {}, appendChild(el) { created.push(el); } },
     getElementById(id) { return els.get(id); },
     querySelectorAll() { return []; },
@@ -92,7 +94,7 @@ function runApp({ storageMode = 'ok', seed = {}, hash = '', loc = {}, standalone
     _h: docHandlers
   };
   const windowShim = {
-    addEventListener() {},
+    _h: {}, addEventListener(type, fn) { this._h[type] = fn; },
     matchMedia: (q) => ({ matches: !!standalone && /display-mode/.test(String(q)) }),
     navigator: { standalone: false },
     isSecureContext: secureContext
@@ -108,7 +110,7 @@ function runApp({ storageMode = 'ok', seed = {}, hash = '', loc = {}, standalone
     'window', 'document', 'location', 'localStorage', 'navigator', 'history', 'confirm', 'alert', 'fetch', 'Blob', 'URL',
     script
   );
-  runner(windowShim, documentShim, locationShim, storage, {}, historyShim, () => true,
+  runner(windowShim, documentShim, locationShim, storage, {}, historyShim, () => windowShim.confirmResult !== false,
          (m) => { alerts.push(String(m)); }, undefined, BlobStub, URLStub);
   return { els, created, storage, windowShim, documentShim, docHandlers, blobs, files, alerts, locationShim };
 }
@@ -624,6 +626,7 @@ if (app) {
   ok(/fetch\(req, \{ cache: 'no-cache' \}\)/.test(swSrc), '导航请求会向服务器校验版本（不受托管平台 max-age 影响）');
   ok(/caches\.match\('\.\/index\.html'/.test(swSrc), '断网时能回退到缓存的 index.html');
   ok(!/skipWaiting/.test(swSrc) || /self\.skipWaiting\(\)/.test(swSrc), 'sw.js 安装后立即生效');
+  eq((swSrc.match(/const VERSION = CACHE_PREFIX \+ '([^']+)'/) || [])[1], (script.match(/var APP_VERSION = '([^']+)'/) || [])[1], '离线缓存与应用版本一致');
 
   // 语法自检：sw.js 不参与 DOM 桩执行，这里至少保证它能被解析
   let swSyntaxOk = true, swErr = '';
@@ -852,6 +855,219 @@ if (app) {
       eq(recs(ui)[recs(ui).length - 1].amount, 3850, '金额正确');
     });
   }
+}
+
+/* =========== 14. 1.5.0 搜索、分类、跨月与长列表 =========== */
+{
+  const seed = { 'jz.config.v1': JSON.stringify({ autoExport:'off', snapOn:false }), 'jz.records.v1': JSON.stringify([
+    { id:'s1', type:'expense', amount:2550, cat:'餐饮', note:'午饭 <script>', date:'2026-10-18' },
+    { id:'s2', type:'expense', amount:1800, cat:'饮品', note:'Coffee', date:'2026-10-17' },
+    { id:'s3', type:'income', amount:800000, cat:'工资', date:'2026-10-01' },
+    { id:'s4', type:'expense', amount:3000, cat:'餐饮', note:'午饭', date:'2026-09-18' }
+  ]) };
+  const a = runApp({ seed }), e = a.els;
+  e.get('monthPicker').value = '2026-10'; e.get('monthPicker').onchange();
+  eq(e.get('listCount').textContent, '3 笔记录', '月份直达只显示所选月');
+  ok(/&lt;script&gt;/.test(e.get('listBox').innerHTML), '备注 HTML 作为文本转义');
+  e.get('searchInput').value = '午饭'; fireInput(e.get('searchInput'));
+  eq(e.get('listCount').textContent, '1 笔记录', '备注关键词筛选');
+  ok(/25\.50/.test(e.get('filterInfo').textContent), '筛选统计独立显示');
+  ok(/43\.50/.test(e.get('sumExp').innerHTML), '搜索不改变月份总支出');
+  e.get('allMonths').checked = true; e.get('allMonths').onchange();
+  eq(e.get('listCount').textContent, '2 笔记录', '跨月搜索命中历史记录');
+  ok(/2026年/.test(e.get('listBox').innerHTML), '跨月分组显示年份');
+  e.get('clearSearch').onclick();
+  eq(e.get('listCount').textContent, '4 笔记录', '清除关键词保留跨月选择');
+  fire(e.get('listSeg'), 'click', { filter:'income' });
+  eq(e.get('listCount').textContent, '1 笔记录', '收入类型筛选');
+  fire(e.get('listSeg'), 'click', { filter:'expense' });
+  e.get('categoryFilter').value = '餐饮'; e.get('categoryFilter').onchange();
+  eq(e.get('listCount').textContent, '2 笔记录', '分类与跨月组合筛选');
+  e.get('searchInput').value = '不存在'; fireInput(e.get('searchInput'));
+  ok(/没有找到匹配/.test(e.get('listBox').innerHTML), '搜索空状态明确');
+  fire(e.get('listBox'), 'click', { action:'reset' });
+  eq(e.get('listCount').textContent, '3 笔记录', '清除筛选回到当前月份');
+  e.get('searchInput').value = 'COFFEE'; fireInput(e.get('searchInput'));
+  eq(e.get('listCount').textContent, '1 笔记录', '搜索不区分大小写');
+  e.get('searchInput').value = '18.00'; fireInput(e.get('searchInput'));
+  eq(e.get('listCount').textContent, '1 笔记录', '支持金额搜索');
+  const many = Array.from({ length:205 }, (_, i) => ({ id:'many'+i, date:todayLocal(), amount:100, cat:'餐饮' }));
+  const b = runApp({ seed:{ 'jz.records.v1':JSON.stringify(many), 'jz.config.v1':JSON.stringify({ autoExport:'off', snapOn:false }) } });
+  eq((b.els.get('listBox').innerHTML.match(/class="rec"/g) || []).length, 100, '长列表首屏最多 100 条');
+  eq(b.els.get('sumCnt').textContent, 205, '长列表汇总仍包含所有记录');
+  b.els.get('loadMore').onclick();
+  eq((b.els.get('listBox').innerHTML.match(/class="rec"/g) || []).length, 200, '加载更多追加到 200 条');
+  b.els.get('loadMore').onclick();
+  eq(b.els.get('loadMore').hidden, true, '加载全部后隐藏按钮');
+}
+
+/* =========== 15. 月份预算与主题 =========== */
+{
+  const a = runApp(), e = a.els;
+  e.get('monthPicker').value = '2026-10'; e.get('monthPicker').onchange();
+  e.get('editBudget').onclick();
+  eq(e.get('budgetForm').hidden, false, '打开预算表单');
+  e.get('budgetInput').value = '3000.50'; e.get('saveBudget').onclick();
+  eq(cfgOf(a).budgets['2026-10'], 300050, '预算按分落盘');
+  eq(e.get('budgetValue').textContent, '¥3,000.50', '显示剩余预算');
+  eq(e.get('budgetForm').hidden, true, '保存后收起预算表单');
+  e.get('fab').onclick(); e.get('amt').value = '3100'; e.get('date').value = '2026-10-18'; e.get('sheetSave').onclick();
+  ok(/已超出预算/.test(e.get('budgetCaption').textContent), '超预算提示');
+  eq(e.get('budgetValue').textContent, '¥99.50', '超预算金额准确');
+  eq(e.get('budgetBar').style.width, '100.0%', '超预算进度不溢出');
+  eq(e.get('budgetBar').style.background, 'var(--exp)', '超预算使用警示色');
+  e.get('prevM').onclick();
+  ok(/给花费/.test(e.get('budgetValue').textContent), '各月份预算独立');
+  e.get('nextM').onclick();
+  eq(e.get('budgetValue').textContent, '¥99.50', '返回月份保留预算');
+  e.get('themeSelect').value = 'dark'; e.get('themeSelect').onchange();
+  eq(cfgOf(a).theme, 'dark', '保存深色主题偏好');
+  eq(a.documentShim.documentElement.dataset.theme, 'dark', '应用深色主题');
+  const backup = a.windowShim.__jz.buildBackup();
+  eq(backup.appVersion, '1.5.0', '备份标识应用版本');
+  eq(backup.config.budgets['2026-10'], 300050, '备份包含月度预算');
+  eq('pin' in backup.config, false, '新版备份仍排除密码');
+  a.storage.failWrites = true;
+  e.get('budgetInput').value = '9000'; e.get('saveBudget').onclick();
+  eq(a.windowShim.__jz.buildBackup().config.budgets['2026-10'], 300050, '预算保存失败回滚内存');
+  a.storage.failWrites = false;
+  e.get('removeBudget').onclick();
+  eq(cfgOf(a).budgets['2026-10'], undefined, '移除预算落盘');
+}
+
+/* =========== 16. 连续记账、撤销删除与保存失败 =========== */
+{
+  const a = runApp(), e = a.els;
+  e.get('fab').onclick(); e.get('amt').value = '25'; e.get('note').value = '午饭';
+  e.get('saveContinue').onclick();
+  eq(recs(a).length, 1, '连续记账保存第一笔');
+  eq(e.get('sheet').classList.contains('show'), true, '保存并继续保持面板');
+  eq(e.get('amt').value, '', '保存并继续清空金额');
+  eq(e.get('note').value, '', '保存并继续清空备注');
+  e.get('amt').value = '10'; e.get('sheetSave').onclick();
+  eq(recs(a).length, 2, '连续记账第二笔落盘');
+  fire(e.get('listBox'), 'click', { id:recs(a)[0].id });
+  eq(e.get('saveContinue').hidden, true, '编辑记录不显示连续新增');
+  e.get('sheetDelete').onclick();
+  eq(recs(a).length, 1, '删除后落盘');
+  eq(e.get('toastUndo').hidden, false, '删除后提供撤销');
+  e.get('toastUndo').onclick();
+  eq(recs(a).length, 2, '撤销删除恢复记录');
+  a.storage.failWrites = true;
+  e.get('fab').onclick(); e.get('amt').value = '66'; e.get('sheetSave').onclick();
+  eq(recs(a).length, 2, '空间满时不写入新增记录');
+  eq(e.get('meCount').textContent, 2, '空间满时内存与持久化保持一致');
+  eq(e.get('sheet').classList.contains('show'), true, '保存失败保留输入面板');
+  eq(e.get('amt').value, '66', '保存失败保留输入金额');
+  ok(/保存失败/.test(e.get('toast').textContent), '保存失败不提示成功');
+  a.storage.failWrites = false; e.get('sheetSave').onclick();
+  eq(recs(a).length, 3, '释放空间后可重试保存');
+  fire(e.get('listBox'), 'click', { id:recs(a)[0].id });
+  a.storage.failWrites = true; e.get('amt').value = '999'; e.get('sheetSave').onclick();
+  eq(recs(a).find(r=>r.id===recs(a)[0].id).amount, 1000, '编辑失败不会改变原记录');
+  e.get('sheetDelete').onclick();
+  eq(recs(a).length, 3, '删除写入失败不会丢数据');
+  a.storage.failWrites = false;
+  a.storage.setItem('jz.records.v1', JSON.stringify([{ id:'external', date:todayLocal(), amount:100 }]));
+  e.get('sheetSave').onclick();
+  eq(recs(a)[0].id, 'external', '并发修改不会被旧窗口覆盖');
+  eq(e.get('conflictWarning').hidden, false, '并发修改提示重新加载');
+}
+
+/* =========== 17. 日期、异常账本、导出安全与手机 PIN =========== */
+{
+  const a = runApp(), e = a.els, api = a.windowShim.__jz;
+  eq(api.normalizeRows([{ date:'2025-02-29', amount:100 }]).bad, 1, '非闰年 2 月 29 日被拒绝');
+  eq(api.normalizeRows([{ date:'2024-02-29', amount:100 }]).bad, 0, '闰年日期有效');
+  eq(api.normalizeRows([{ date:'2026-13-01', amount:100 }]).bad, 1, '无效月份被拒绝');
+  eq(api.normalizeRows([{ date:'2026-01-01', amount:1e30 }]).bad, 1, '溢出金额被拒绝');
+  eq(api.normalizeRows([{ date:'2026-01-01', amount:true }]).bad, 1, '布尔值不能作为金额');
+  const legacy = [{date:'2026-01-01',amount:100},{date:'2026-01-01',amount:100}];
+  eq(api.normalizeRows(legacy).records.map(r=>r.id), api.normalizeRows(legacy).records.map(r=>r.id), '无 ID 旧备份生成稳定 ID，重复导入可去重');
+  ok(api.normalizeRows(legacy).records[0].id !== api.normalizeRows(legacy).records[1].id, '无 ID 的两条相同记录仍分别保留');
+  const rows = api.normalizeRows([{ id:'__proto__', date:todayLocal(), amount:100, cat:'__proto__' }, { id:'constructor', date:todayLocal(), amount:200, cat:'constructor' }]).records;
+  eq(rows.length, 2, '原型同名 ID 可正常处理');
+  eq(api.aggregate(rows).length, 2, '原型同名分类可正确聚合');
+  e.get('fab').onclick(); e.get('amt').value = '0.001'; e.get('sheetSave').onclick();
+  eq(recs(a).length, 0, '小于一分的金额不能记为零');
+  e.get('amt').value = '999999999999'; e.get('sheetSave').onclick();
+  eq(recs(a).length, 0, '超出上限的金额不能保存');
+  e.get('amt').value = '10'; e.get('date').value = '2025-02-29'; e.get('sheetSave').onclick();
+  eq(recs(a).length, 0, '记账日期也严格校验');
+  e.get('date').value = todayLocal(); e.get('note').value = '=HYPERLINK("https://example.com")'; e.get('sheetSave').onclick();
+  ok(api.toCSV().includes("'=HYPERLINK"), 'CSV 备注以公式符号开头时转义');
+  const raw = '{not-json';
+  const b = runApp({ seed:{ 'jz.records.v1':raw } });
+  eq(b.els.get('recoveryWarning').hidden, false, '异常账本持续显示恢复提示');
+  b.els.get('fab').onclick(); b.els.get('amt').value = '10'; b.els.get('sheetSave').onclick();
+  eq(b.storage.getItem('jz.records.v1'), raw, '异常账本原文不被普通记账覆盖');
+  e.get('pinSwitch').onclick();
+  ok(/data-k="ok"/.test(e.get('pad').innerHTML), '手机设置 PIN 有明确确认键');
+  eq(e.get('cancelPin').hidden, false, 'PIN 设置可取消');
+  e.get('cancelPin').onclick();
+  eq(e.get('lock').hidden, true, '取消 PIN 返回账本');
+  const d = runApp({ storageMode:'throw' });
+  eq(d.els.get('storageWarning').hidden, false, '无持久化存储时显示常驻警告');
+}
+
+/* =========== 18. 恢复确认、预算恢复和失败保护 =========== */
+{
+  const a = runApp(), e = a.els;
+  e.get('fab').onclick(); e.get('amt').value = '10'; e.get('sheetSave').onclick();
+  const payload = JSON.stringify({ records:[{id:'imported',date:todayLocal(),amount:1234}], config:{ budgets:{'2026-10':500000,'bad':10},pin:{hash:'bad'} } });
+  const openPayload = app => { app.els.get('fileInput').files = [{text:()=>Promise.resolve(payload)}]; app.els.get('fileInput').onchange(); };
+  openPayload(a); await new Promise(r=>setTimeout(r,0));
+  a.windowShim.confirmResult = false; e.get('panelReplace').onclick();
+  eq(recs(a).length,1,'取消覆盖不改变条数');
+  ok(recs(a)[0].id !== 'imported','取消覆盖保留原账目');
+  eq(e.get('panel').classList.contains('show'),true,'取消覆盖保留预览');
+  a.windowShim.confirmResult = true; a.storage.failWrites = true; e.get('panelReplace').onclick();
+  ok(recs(a)[0].id !== 'imported','无法保存保护快照时停止覆盖');
+  a.storage.failWrites = false; e.get('panelReplace').onclick();
+  eq(recs(a)[0].id,'imported','确认后覆盖恢复成功');
+  eq(cfgOf(a).budgets['2026-10'],500000,'覆盖恢复包含预算');
+  eq(cfgOf(a).budgets.bad,undefined,'恢复预算忽略无效月份');
+  eq(cfgOf(a).pin,null,'备份中的 PIN 不会导入');
+  const b = runApp({seed:{'jz.records.v1':'broken-json'}});
+  openPayload(b); await new Promise(r=>setTimeout(r,0)); b.els.get('panelReplace').onclick();
+  eq(recs(b)[0].id,'imported','损坏账本可从有效备份恢复');
+  eq(JSON.parse(b.storage.getItem('jz.recovery.v1')).raw,'broken-json','恢复前保存损坏账本原文');
+  eq(b.els.get('recoveryWarning').hidden,true,'成功恢复后关闭损坏提示');
+}
+
+/* =========== 19. 真实 Service Worker 逻辑：完整安装、缓存隔离与回退 =========== */
+{
+  const src = readFileSync(join(DIR,'sw.js'),'utf8'), handlers = {}, deleted = [], waited = [];
+  const scope = 'https://example.com/moneybook/', prefix = 'jz-' + scope;
+  let failInstall = false, activated = false, cached = true, requestedCache = '';
+  const cache = { addAll:async reqs=>{ if(failInstall) throw new Error('missing asset'); eq(reqs.length,6,'安装完整预缓存 6 个外壳地址'); }, put:async()=>{} };
+  const shim = {
+    self:{registration:{scope},addEventListener:(name,fn)=>handlers[name]=fn,skipWaiting:()=>{activated=true;},clients:{claim:async()=>{}}},
+    caches:{open:async()=>cache,keys:async()=>[prefix+'1.4.3',prefix+'1.5.0','another-app','jz-https://example.com/other/1.0.0'],delete:async name=>deleted.push(name),match:async(key,opts)=>{requestedCache=opts.cacheName;return cached?new Response('cached-page',{status:200}):undefined;}},
+    fetch:async()=>new Response('server-error',{status:500}),
+    Request:class{constructor(url,opts){this.url=url;this.cache=opts.cache;}}, Response, URL, location:{origin:'https://example.com'}
+  };
+  runInNewContext(src,shim);
+  handlers.install({waitUntil:p=>waited.push(p)}); await Promise.all(waited.splice(0));
+  eq(activated,true,'完整预缓存后激活新版');
+  activated=false;failInstall=true;
+  handlers.install({waitUntil:p=>waited.push(p)});
+  let rejected=false; try{await Promise.all(waited.splice(0));}catch(e){rejected=true;}
+  eq(rejected,true,'预缓存缺文件时安装失败');
+  eq(activated,false,'预缓存不完整时不会取代旧版');
+  handlers.activate({waitUntil:p=>waited.push(p)}); await Promise.all(waited.splice(0));
+  eq(deleted,[prefix+'1.4.3'],'只清理当前应用路径的旧缓存');
+  let response;
+  const req={method:'GET',mode:'navigate',url:scope+'index.html'};
+  handlers.fetch({request:req,respondWith:p=>response=p,waitUntil:p=>waited.push(p)});
+  eq(await (await response).text(),'cached-page','服务器 500 时回退离线页面');
+  eq(requestedCache,prefix+'1.5.0','回退只查找当前版本缓存');
+  cached=false;
+  handlers.fetch({request:req,respondWith:p=>response=p,waitUntil:p=>waited.push(p)});
+  eq((await response).status,503,'没有缓存时返回明确的离线错误页');
+  let intercepted=false;
+  handlers.fetch({request:{method:'GET',mode:'cors',url:'https://example.com/other/backup.json'},respondWith:()=>intercepted=true});
+  eq(intercepted,false,'不缓存同域下其他应用的数据');
 }
 
 /* ---------------- 输出 ---------------- */
