@@ -1,102 +1,87 @@
 # 轻记账
 
-一个**单文件**、**完全离线**、能装到安卓桌面上的极简记账本。
+一个**无需账号、无需后端、支持离线使用**的极简记账本。通过 HTTPS 静态托管部署后，
+可从手机浏览器安装到桌面；账目保存在当前设备的浏览器本地存储中，不会上传到服务器。
 
-没有账号、没有网络请求、没有后端。所有数据只存在你手机浏览器的本地存储里。
+当前版本 **1.5.1**：橙色主题与萌趣账本图标。完整改动见 [CHANGELOG.md](CHANGELOG.md)。
 
-## 1.5.1 · 橙色主题与萌趣图标
+## 一、通过 HTTPS 静态托管安装
 
-主题与深色模式改为暖橙色，应用图标、顶栏和锁屏使用用户提供的「萌趣理财账本」图片。
-保留 1.5.0 的记账、预算、搜索与备份功能，原有数据直接兼容。
+安装流程：**部署静态文件 → 打开 HTTPS 网址 → 安装到手机桌面**。
+部署完成后，日常使用无需电脑开机，也无需手机与电脑连接同一 Wi-Fi。
 
-## 1.5.0 功能
+### 1. 部署到 GitHub Pages（推荐）
 
-- **搜索与筛选**：按备注、分类、金额搜索，组合支出 / 收入与分类筛选；勾选「跨月查找」搜索历史账目。顶部月份可以直接选择。
-- **月度预算**：每个月单独设置支出预算，查看剩余额度、已用比例、日均可用金额与超支提示。搜索不会改变整月汇总和预算。
-- **更快记账**：「保存并继续」保留日期与分类，清空金额和备注；删除后 8 秒内可撤销。
-- **新的界面**：手机底部导航、电脑侧边导航，浅色 / 深色 / 跟随系统三种外观；支持键盘焦点与减少动态效果。
-- **保存更可靠**：写入成功才提示保存成功；存储异常、账本损坏、其他窗口修改均有提示。异常账本可导出原始数据后恢复。
-- **备份更稳妥**：严格校验日期和金额，重复导入无 ID 的旧记录也可去重；覆盖前确认并创建快照，备份包含月度预算。CSV 备注中的公式符号会转义。
-- **离线更新**：按应用路径隔离缓存，完整缓存后才激活新版，服务器出错时回退离线页面。
+本仓库根目录已包含完整的应用文件，可直接从 `main` 分支发布，**无需先打包或上传 `dist`**。
 
-旧版账本直接兼容，继续使用原来的网址即可。完整改动见 [CHANGELOG.md](CHANGELOG.md)。
+1. 打开 [GitHub 仓库](https://github.com/PPjh/moneyBook)；使用自己的账号部署时，先 Fork 或将项目推送到自己的仓库。
+2. 进入仓库的 **Settings → Pages**。
+3. 在 **Build and deployment** 下，将 **Source** 设为 **Deploy from a branch**。
+4. 将 **Branch** 设为 **main**，目录设为 **/ (root)**，点击 **Save**。
+5. 等待部署完成，可在 **Actions** 中查看部署状态。
+6. 在 **Settings → Pages** 中复制站点的 **HTTPS 地址**；如可配置 **Enforce HTTPS**，将其开启。
+
+GitHub Free 使用公开仓库发布 Pages；其他套餐的支持范围见
+[GitHub Pages 官方说明](https://docs.github.com/en/pages/getting-started-with-github-pages/configuring-a-publishing-source-for-your-github-pages-site)。
+HTTPS 设置见 [GitHub 官方指南](https://docs.github.com/en/pages/getting-started-with-github-pages/securing-your-github-pages-site-with-https)。
+
+> 请使用 Pages 页面显示的站点地址，而不是 `github.com/...` 仓库地址。
+> 仓库根目录的 `.nojekyll` 已包含在项目中，保留即可。
+
+### 2. 在安卓手机上安装
+
+1. 用手机 **Chrome** 打开上一步得到的 **`https://…` 站点地址**。
+2. 首次打开时保持联网，等待页面和离线资源加载完成。
+3. 点击浏览器右上角菜单，选择 **「安装应用」**；部分版本会显示 **「添加到主屏幕 → 安装」**，按提示确认。
+4. 从桌面的「轻记账」图标打开应用，开始记账。
+5. 可以在联网打开成功后开启飞行模式，再从桌面图标重开，确认离线记账正常。
+
+若只创建了普通网页快捷方式、打开后仍有浏览器地址栏，请确认使用的是 HTTPS 站点，
+再按浏览器提供的安装流程操作。不同浏览器的安装入口可能不同，参考
+[PWA 安装说明](https://web.dev/learn/pwa/installation/)。
+
+### 其他 HTTPS 静态托管平台
+
+使用 Cloudflare Pages 或 Netlify 时，先在项目目录运行：
+
+```bash
+node build.mjs
+```
+
+生成的 `dist/` 包含以下 7 个文件，**`index.html` 必须位于上传目录的根目录**：
+
+```text
+dist/
+├── index.html
+├── manifest.json
+├── sw.js
+├── icon-192.png
+├── icon-512.png
+├── icon-maskable-512.png
+└── .nojekyll
+```
+
+- **Cloudflare Pages**：进入 **Workers & Pages**，创建应用时选择 Pages 的直接上传 / 拖放文件入口，
+  上传整个 `dist` 文件夹并部署。操作见 [Direct Upload 官方说明](https://developers.cloudflare.com/pages/get-started/direct-upload/)。
+- **Netlify Drop**：打开 [Netlify Drop](https://app.netlify.com/drop)，将整个 `dist` 文件夹拖入上传区域。
+  操作见 [Netlify 拖放部署说明](https://docs.netlify.com/deploy/create-deploys/#drag-and-drop)。
+
+获得平台分配的 HTTPS 地址后，按上面的安卓安装步骤操作。
+只需上传应用静态文件，账目备份 JSON 不属于部署文件。
+
+## 二、功能
 
 ![1.5.1 桌面界面（演示数据）](screenshots/1.5.1-desktop.png)
 
-```
-MoneyBook/
-├── index.html              ← 整个应用（HTML + CSS + JS 全在里面）
-├── manifest.json           ← PWA 清单（安装到主屏幕用）
-├── sw.js                   ← Service Worker（离线缓存用）
-├── icon-192.png            ← 图标
-├── icon-512.png
-├── icon-maskable-512.png   ← 自适应图标（安卓圆形/方形裁切）
-├── assets/icon-source.png  ← 用户提供的图标原图（只用于生成图标，不随 dist 部署）
-├── build.mjs               ← 打包出 dist/（可直接上传的静态站点）
-├── serve.mjs               ← 零依赖局域网服务器，方便手机访问
-├── gen-icons.mjs           ← 重新生成图标（纯 Node，无依赖）
-├── check.mjs               ← 自检脚本：node check.mjs
-├── DEPLOY.md               ← 放到免费 HTTPS 托管、拿到真·全屏 App 的步骤
-├── screenshots/            ← 界面截图
-└── README.md
-```
-
-> `index.html` 可以单独拿走使用，其余文件只是「装成 App」的包装。
-> **想要没有地址栏的全屏 App，必须走 HTTPS，见 [DEPLOY.md](DEPLOY.md)。**
-
----
-
-## 一、装到安卓手机上（推荐）
-
-### 1. 电脑上启动局域网服务器
-
-```bash
-cd MoneyBook
-node serve.mjs
-```
-
-会打印类似：
-
-```
-手机： http://192.168.1.23:8080/   ← 手机连同一 WiFi 后打开这个
-```
-
-### 2. 手机 Chrome 打开这个地址
-
-功能完全正常，记账、统计、密码锁、备份导出都能用。
-
-### 3. ⚠️ 但这样**装不成全屏 App**，顶部一定会有地址栏
-
-因为 Chrome 只允许**安全来源**（`https://`，或 `localhost`）把网页安装成独立应用
-（[官方可安装条件](https://web.developers.google.cn/articles/install-criteria?hl=zh-cn)）。
-`http://192.168.x.x` 不是安全来源，浏览器最多只能「添加到主屏幕」，而那只是一个**书签**：
-点开仍是普通标签页，地址栏在，而且 **Service Worker 注册不了 → 断网打不开**。
-
-所以想真正全屏，得换一个 https 地址。见下面第五节。
-
-> **换端口**：`node serve.mjs 9000`
-
----
-
-## 二、其他打开方式
-
-| 方式 | 说明 |
-| --- | --- |
-| 直接双击 `index.html` | 电脑浏览器能正常用；手机端功能也全（数据存本机），但不能安装、没有离线缓存，只建议临时试用 |
-| **HTTPS 静态托管**（推荐） | GitHub Pages / Cloudflare Pages / Netlify Drop 都行。**只有这种方式能真正装成全屏 App + 离线可用** |
-| 微信/QQ 传文件到手机 | 用手机浏览器「打开方式」选 Chrome 打开也能用，同样装不成 App |
-
----
-
-## 三、功能
-
 **我的**
+
 - **总结余**（全部收入 − 全部支出），正数绿色、负数红色
 - 累计收入 / 累计支出 / 记账天数 / 累计笔数
 - 密码锁、自动锁定、自动快照与导出、本机快照、清空数据
 - 页面最底部显示当前**版本号**（由 `APP_VERSION` 常量渲染）
 
 **明细**
+
 - 顶部月份切换，卡片显示本月支出 / 收入 / 结余 / 笔数
 - 流水按天分组，每天有小计
 - 点任意一条即可编辑，编辑页可删除
@@ -104,6 +89,7 @@ node serve.mjs
 - 月度预算独立于筛选，始终根据整月支出计算
 
 **记一笔**
+
 - 支出 / 收入切换
 - 19 个支出分类（含 数码 / token / 零食 / 饮品）、7 个收入分类（emoji 图标，无需图片资源）
 - 金额、日期、备注
@@ -113,17 +99,20 @@ node serve.mjs
 - 支持保存并继续记账；删除后 8 秒内可以撤销
 
 **统计**
+
 - 本月合计、环比上月、日均、最多的一类
 - 分类占比环形图 + 图例
 - 分类排行条形图
 - 近 6 个月支出/收入趋势
 
 **密码锁**
+
 - 4–6 位 PIN，加盐哈希保存（**不存明文**）
 - 切到后台超过设定时间自动重新加锁（立即 / 1 分钟 / 5 分钟 / 30 分钟 / 从不）
 - 忘记密码只能清空数据（数据本身没有加密，见下方说明）
 
 **备份与恢复**
+
 - **自动快照**（默认开）：每天首次打开自动把当前数据存一份到本机，滚动保留最近 10 份。
   清空数据、导入覆盖之前也会自动留一份，随时可以退回去。
 - **自动导出备份**（默认每周）：打开 App 或解锁时若已到周期，会请求下载 JSON 备份；请在浏览器下载记录中确认文件已保存。
@@ -135,57 +124,25 @@ node serve.mjs
 - 导出的文件**不含密码**，可以放心发给别人或丢进网盘。
 
 **其他**
+
 - 外观可选跟随系统、浅色、深色
 - 适配刘海屏与手势条安全区
 - 长列表滚动只在内容区发生，整页不晃
 
 ---
 
-## 五、怎么才能真正全屏（没有地址栏）
+## 三、部署后的更新
 
-Chrome 的硬性条件是：**页面必须来自安全来源**——`https://`、`http://localhost`、`http://127.0.0.1`。
-满足时浏览器菜单里才会出现「安装应用」，装出来的是真正的 WebAPK：独立图标、全屏、断网可用。
-不满足时只有「添加到主屏幕」，那是书签，一定有地址栏。
+- **GitHub Pages**：将更新推送到配置的 `main` 分支，等待 Pages 部署成功。站点从仓库根目录发布，更新时也应修改根目录的应用文件。
+- **Cloudflare Pages / Netlify 手动上传**：重新运行 `node build.mjs`，在原有站点中部署新的 `dist` 文件夹，沿用原来的 HTTPS 地址。
+- 手机联网后重新打开应用；出现「发现新版本」提示时，可点击「立即更新」。在「我的」页面底部核对版本号。
 
-判断方法：如果装好后从桌面图标点开**还有地址栏**，那就是书签快捷方式，说明当前地址不是安全来源。
-
-### 办法一 · 免费 HTTPS 静态托管（推荐，步骤见 [DEPLOY.md](DEPLOY.md)）
-
-```bash
-node build.mjs        # 生成 dist/，里面是可直接上传的 7 个文件
-```
-
-1. 把 `dist/` 里的文件传到任意免费静态托管：
-   - **GitHub Pages**：新建 **Public** 仓库 → 拖入文件 → Settings → Pages → 选 main / (root)
-   - **Cloudflare Pages**：Workers & Pages → Create → Pages → Upload assets → 拖入 `dist`
-   - **Netlify Drop**：把 `dist` 拖到 app.netlify.com/drop
-2. 手机 Chrome 打开分到的 `https://…` 地址
-3. 菜单 → **「安装应用」** → 桌面上就有了「轻记账」，全屏、断网可用
-
-> 不用担心账目外泄：数据只存在手机本地，托管方拿到的只是这个网页本身。
-> `build.mjs` 已经帮你排掉了两个平台坑：清单用 `.json` 后缀（MIME 一定正确）、
-> 附带 `.nojekyll`（GitHub Pages 不会用 Jekyll 处理文件）。
-
-详细的点击步骤、验证方法和后续更新方式都在 **[DEPLOY.md](DEPLOY.md)**。
-
-### 办法二 · 完全走局域网（要装一张证书）
-
-在电脑上给服务器配一张证书（自签名即可），并**把证书安装到手机里信任**，
-然后用 `https://192.168.x.x:8443` 访问，同样能安装。全程不出局域网，但没有办法一是零配置。
-
-### 办法三 · 有数据线和开发者模式
-
-用 `adb reverse tcp:8080 tcp:8080` 把电脑端口映射到手机，
-然后手机访问 `http://localhost:8080`——**localhost 算安全来源**，可以正常安装。
-
-### 什么都不做行不行？
-
-行。直接在 `http://192.168.x.x:8080` 的标签页里记账，功能、数据、统计、备份全都不受影响，
-代价只是：顶部一直有地址栏、断网打不开、备份要靠手动点（自动快照仍然照常工作）。
+正常更新无需重新安装。保持相同的站点地址和浏览器，原有本地账目会继续保留。
+更换域名、设备或浏览器前，请先导出备份，再在新环境中恢复。
 
 ---
 
-## 六、数据与安全（请务必看一眼）
+## 四、数据与安全
 
 - 数据存在浏览器的 **localStorage**（`jz.records.v1` / `jz.config.v1`），**只在本机**。
 - ⚠️ **卸载应用、清理浏览器数据、换手机，记录都会消失。**
@@ -203,7 +160,29 @@ node build.mjs        # 生成 dist/，里面是可直接上传的 7 个文件
 
 ---
 
-## 七、开发与自检
+## 五、开发与自检
+
+项目主要文件：
+
+```text
+MoneyBook/
+├── index.html              应用界面与逻辑
+├── manifest.json           PWA 安装清单
+├── sw.js                   离线缓存
+├── icon-192.png
+├── icon-512.png
+├── icon-maskable-512.png
+├── .nojekyll               GitHub Pages 静态发布标记
+├── assets/icon-source.png  图标原图，不随 dist 部署
+├── build.mjs               生成 dist 部署目录
+├── serve.mjs               本地开发预览
+├── gen-icons.mjs           生成应用图标
+├── check.mjs               零依赖功能自检
+├── browser-check.mjs       可选浏览器回归
+├── screenshots/            演示截图
+├── CHANGELOG.md            更新日志
+└── README.md
+```
 
 ```bash
 node check.mjs      # 功能回归：记账/编辑/撤销、搜索、预算、存储失败、密码锁、备份与 PWA
@@ -230,12 +209,7 @@ node gen-icons.mjs  # 从 assets/icon-source.png 生成三个图标，无第三�
 | 主题色 | `index.html` 的 `:root` 里 `--brand`，以及 `manifest.json` 的 `theme_color` |
 | 图标 | 替换 `assets/icon-source.png`（8-bit RGB / RGBA PNG），再运行 `node gen-icons.mjs` |
 
-### 改完之后怎么让手机拿到新版
-
-**不需要重新安装。** `sw.js` 对页面导航用的是**网络优先**，`index.html` 又装着全部功能，
-所以只要**联网重新打开一次 App**就是新版本，数据（流水/密码/快照）完全不受影响。
+### 发布新版本
 
 每次发布同步更新 `index.html` 的 `APP_VERSION` 与 `sw.js` 的缓存版本，然后重新打包。
-细节和开发迭代流程见 **[DEPLOY.md](DEPLOY.md#以后加了功能要重新安装吗)**。
-
-App 会自己更新：联网重新打开一次就是新版；有新版本时底部还会自动弹一条「发现新版本 / 立即更新」。
+根据上面的 HTTPS 托管方式更新站点，并在手机上核对版本和离线打开情况。
