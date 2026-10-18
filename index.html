@@ -561,7 +561,7 @@ body[data-view="stats"] .fab,body[data-view="me"] .fab{display:none}
         </button>
       </div>
 
-      <div class="verline">轻记账 <span id="appVer">1.5.2</span> · 单文件 · 完全离线</div>
+      <div class="verline">轻记账 <span id="appVer">1.5.3</span> · 单文件 · 完全离线</div>
     </section>
   </div>
 
@@ -675,7 +675,7 @@ var PALETTE = ['#ed8a2d','#f4bb46','#d56545','#996fca','#6f9b69','#d88aaa','#72a
 var WEEK = ['日','一','二','三','四','五','六'];
 var TYPE_NAME = { expense:'支出', income:'收入' };
 /* 发布时同步此版本与 sw.js 缓存版本；界面和备份从此读取。 */
-var APP_VERSION = '1.5.2';
+var APP_VERSION = '1.5.3';
 var MAX_CENTS = 99999999999;
 
 function $(id){ return document.getElementById(id); }
@@ -1293,7 +1293,7 @@ function openRestorePreview(rows, meta, fromSnap, idx){
 function closePanel(){ hideModal('panel'); pending = null; $('restoreFileRow').focus(); }
 
 /* ===================== 固定备份文件夹 ===================== */
-var backupDirectory = null, backupLocationReady = false, backupLocationError = '', backupPermissionNeeded = false, backupBusy = false, backupPicking = false;
+var backupDirectory = null, backupLocationReady = false, backupLocationError = '', backupPermissionState = 'prompt', backupAccessBlocked = false, backupBusy = false, backupPicking = false;
 
 function folderBackupSupported(){
   return !!(window.isSecureContext && typeof window.showDirectoryPicker === 'function' && window.indexedDB);
@@ -1326,7 +1326,7 @@ async function restoreBackupDirectory(){
       var handle = await backupDirectoryStore('get');
       if(handle && handle.kind === 'directory'){
         backupDirectory = handle;
-        backupPermissionNeeded = !handle.queryPermission || await handle.queryPermission({ mode:'readwrite' }) !== 'granted';
+        backupPermissionState = handle.queryPermission ? await handle.queryPermission({ mode:'readwrite' }) : 'prompt';
       }
     }
   }catch(e){ backupLocationError = '位置读取失败，请重新选择文件夹'; }
@@ -1339,7 +1339,8 @@ function renderBackupLocation(){
   $('backupFolderAction').textContent = !supported ? '普通下载' : backupDirectory && folderMode ? '更换 ›' : '选择文件夹 ›';
   $('backupFolderInfo').textContent = !backupLocationReady ? '正在读取备份位置…' : backupLocationError ? (backupDirectory ? backupDirectory.name + ' · ' : '') + backupLocationError : (!supported ?
     '当前浏览器不支持固定文件夹，请使用新版 Chrome；仍可下载备份' : folderMode ? (backupDirectory ?
-    backupDirectory.name + (backupPermissionNeeded ? ' · 需要重新授权，请点「立即备份」' : ' · 后续备份均保存到此文件夹') :
+    backupDirectory.name + (backupPermissionState === 'denied' ? ' · 访问被拒绝，请检查浏览器权限' :
+      backupPermissionState === 'prompt' ? ' · 位置已记住，备份时确认访问' : ' · 后续备份均保存到此文件夹') :
     '尚未选择，点击设置手机上的固定文件夹') : '普通下载 · 可点击改为固定文件夹');
   $('resetBackupFolderRow').hidden = !folderMode || !backupDirectory;
   $('downloadBackupRow').hidden = !folderMode;
@@ -1348,10 +1349,16 @@ function renderBackupLocation(){
     (cfg.lastExport ? '上次导出 ' + stamp(cfg.lastExport) : '还没有导出过');
   $('backupNowRow').disabled = backupBusy || backupPicking || !backupLocationReady;
   $('resetBackupFolderRow').disabled = backupBusy || backupPicking;
-  var attention = folderMode && backupLocationReady && (!supported || backupLocationError || !backupDirectory || backupPermissionNeeded);
+  var permissionAttention = backupPermissionState === 'denied' || backupAccessBlocked || (backupPermissionState !== 'granted' && folderBackupDue());
+  var attention = folderMode && backupLocationReady && (!supported || backupLocationError || !backupDirectory || permissionAttention);
   $('backupLocationWarning').hidden = !(attention && records.length && (cfg.autoExport !== 'off' || backupDirectory));
   $('backupLocationWarningText').textContent = backupLocationError || (!supported ? '当前浏览器不支持固定文件夹，请升级 Chrome 或临时下载备份。' :
-    !backupDirectory ? '尚未选择固定备份文件夹，请设置后启用文件备份。' : '固定文件夹备份需要重新授权，请在「我的」点击「立即备份」。');
+    !backupDirectory ? '尚未选择固定备份文件夹，请设置后启用文件备份。' : backupPermissionState === 'denied' ?
+    '备份文件夹访问被拒绝，请在「我的」检查备份位置和浏览器权限。' : '备份尚未完成，需要确认文件夹访问；请在「我的」点击「立即备份」。');
+}
+function folderBackupDue(){
+  var interval = EXPORT_MS[cfg.autoExport] || 0;
+  return interval > 0 && records.length > 0 && Date.now() - (cfg.lastFolderBackup || 0) >= interval;
 }
 async function chooseBackupDirectory(){
   if(state.locked || backupBusy || backupPicking) return false;
@@ -1368,7 +1375,7 @@ async function chooseBackupDirectory(){
       await backupDirectoryStore(backupDirectory ? 'put' : 'delete', backupDirectory);
       return false;
     }
-    backupDirectory = handle; backupPermissionNeeded = false; backupLocationError = '';
+    backupDirectory = handle; backupPermissionState = 'granted'; backupAccessBlocked = false; backupLocationError = '';
     renderBackupLocation(); toast('备份位置已固定为「' + handle.name + '」'); return true;
   }catch(e){
     if(e.name !== 'AbortError') toast('备份位置未能保存，请检查浏览器权限后重试');
@@ -1379,7 +1386,7 @@ async function resetBackupDirectory(){
   if(backupBusy || !confirm('停用固定备份位置并恢复普通下载？文件夹中的已有备份会保留。')) return;
   var previous = cfg.backupTarget; cfg.backupTarget = 'download';
   if(!persistCfg()){ cfg.backupTarget = previous; return; }
-  backupDirectory = null; backupPermissionNeeded = false; backupLocationError = '';
+  backupDirectory = null; backupPermissionState = 'prompt'; backupAccessBlocked = false; backupLocationError = '';
   try{ await backupDirectoryStore('delete'); }catch(e){} // 已停用，不再访问旧位置。
   renderBackupLocation(); toast('已恢复普通下载，原有备份文件已保留');
 }
@@ -1395,8 +1402,9 @@ async function backupToDirectory(manual){
     if(permission !== 'granted' && manual && backupDirectory.requestPermission){
       permission = await backupDirectory.requestPermission({ mode:'readwrite' });
     }
+    backupPermissionState = permission;
     if(permission !== 'granted'){
-      backupPermissionNeeded = true; if(manual) toast('尚未获得写入权限，请重新授权或更换备份文件夹'); return false;
+      backupAccessBlocked = true; if(manual) toast('尚未获得写入权限，请重新授权或更换备份文件夹'); return false;
     }
     if(state.locked) return false;
     var text = backupJSON(), count = records.length;
@@ -1413,15 +1421,15 @@ async function backupToDirectory(manual){
     await writable.write(text); await writable.close(); writable = null; createdFileName = null;
     cfg.lastFolderBackup = Date.now(); cfg.lastExport = cfg.lastFolderBackup;
     var settingsSaved = persistCfg();
-    backupPermissionNeeded = false; backupLocationError = '';
+    backupPermissionState = 'granted'; backupAccessBlocked = false; backupLocationError = '';
     if(!state.locked) toast('已备份 ' + count + ' 条到「' + backupDirectory.name + '」' + (settingsSaved ? '' : '；备份时间未能保存'));
     return true;
   }catch(e){
     if(writable && writable.abort){ try{ await writable.abort(); }catch(abortError){} }
     if(createdFileName){ try{ await backupDirectory.removeEntry(createdFileName); }catch(cleanupError){} }
-    if(e.name === 'NotAllowedError' || e.name === 'SecurityError') backupPermissionNeeded = true;
+    if(e.name === 'NotAllowedError' || e.name === 'SecurityError'){ backupPermissionState = 'denied'; backupAccessBlocked = true; }
     backupLocationError = e.name === 'QuotaExceededError' ? '设备存储空间不足，请释放空间后重试' :
-      e.name === 'NotFoundError' ? '文件夹已移动或删除，请重新选择' : backupPermissionNeeded ? '缺少写入权限，请重新授权' : '备份未完成，请检查文件夹或存储空间后重试';
+      e.name === 'NotFoundError' ? '文件夹已移动或删除，请重新选择' : backupPermissionState === 'denied' ? '缺少写入权限，请重新授权' : '备份未完成，请检查文件夹或存储空间后重试';
     if(!state.locked) toast('备份失败：' + backupLocationError);
     return false;
   }finally{ backupBusy = false; renderBackupLocation(); }

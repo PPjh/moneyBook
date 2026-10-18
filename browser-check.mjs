@@ -182,21 +182,42 @@ try{
   await fp.waitForFunction(()=>JSON.parse(localStorage.getItem('jz.config.v1')).lastFolderBackup>0);
   assert.equal((await savedBackups()).length,4);
   await fp.addInitScript(()=>{
-    if(sessionStorage.getItem('test-folder-permission')==='prompt'){
-      window.__folderPermission='prompt';window.__permissionRequests=0;window.__permissionQueries=0;
+    if(sessionStorage.getItem('test-folder-permission')){
+      window.__folderPermission=sessionStorage.getItem('test-folder-permission');window.__permissionRequests=0;window.__permissionQueries=0;
       FileSystemDirectoryHandle.prototype.queryPermission=async()=>{window.__permissionQueries++;return window.__folderPermission;};
       FileSystemDirectoryHandle.prototype.requestPermission=async()=>{
         window.__permissionRequests++;window.__folderPermission=window.__requestResult||'denied';return window.__folderPermission;
       };
     }
   });
+  // 最近已成功备份：新会话返回 prompt 不等于权限被拒绝，不应一重开就报警。
+  await fp.evaluate(()=>sessionStorage.setItem('test-folder-permission','prompt'));
+  await fp.reload({waitUntil:'networkidle'});
+  await fp.waitForFunction(()=>document.getElementById('backupFolderInfo').textContent.includes('位置已记住'));
+  assert.equal(await fp.locator('#backupLocationWarning').isVisible(),false);
+  assert.equal(await fp.evaluate(()=>window.__permissionRequests),0);
+  assert.equal((await savedBackups()).length,4);
+  // 周期关闭时也不因待确认访问而报警，但显式拒绝仍需提醒。
   await fp.evaluate(()=>{
-    sessionStorage.setItem('test-folder-permission','prompt');
-    const cfg=JSON.parse(localStorage.getItem('jz.config.v1'));cfg.lastFolderBackup=0;localStorage.setItem('jz.config.v1',JSON.stringify(cfg));
+    const cfg=JSON.parse(localStorage.getItem('jz.config.v1'));cfg.autoExport='off';cfg.lastFolderBackup=0;
+    localStorage.setItem('jz.config.v1',JSON.stringify(cfg));
   });
   await fp.reload({waitUntil:'networkidle'});
-  await fp.waitForFunction(()=>document.getElementById('backupFolderInfo').textContent.includes('需要重新授权'));
+  await fp.waitForFunction(()=>document.getElementById('backupFolderInfo').textContent.includes('位置已记住'));
+  assert.equal(await fp.locator('#backupLocationWarning').isVisible(),false);
+  await fp.evaluate(()=>sessionStorage.setItem('test-folder-permission','denied'));
+  await fp.reload({waitUntil:'networkidle'});
+  await fp.waitForFunction(()=>document.getElementById('backupFolderInfo').textContent.includes('访问被拒绝'));
+  assert.equal(await fp.locator('#backupLocationWarning').isVisible(),true);
+  await fp.evaluate(()=>{
+    sessionStorage.setItem('test-folder-permission','prompt');
+    const cfg=JSON.parse(localStorage.getItem('jz.config.v1'));cfg.autoExport='daily';cfg.lastFolderBackup=0;localStorage.setItem('jz.config.v1',JSON.stringify(cfg));
+  });
+  await fp.reload({waitUntil:'networkidle'});
+  await fp.waitForFunction(()=>document.getElementById('backupFolderInfo').textContent.includes('位置已记住'));
   await fp.waitForFunction(()=>window.__permissionQueries>=2);
+  assert.equal(await fp.locator('#backupLocationWarning').isVisible(),true);
+  assert.match(await fp.locator('#backupLocationWarningText').innerText(),/备份尚未完成/);
   assert.equal(await fp.evaluate(()=>window.__permissionRequests),0);
   assert.equal((await savedBackups()).length,4);
   await fp.locator('#backupNowRow').click();
@@ -206,6 +227,7 @@ try{
   await fp.evaluate(()=>window.__requestResult='granted');
   await fp.locator('#backupNowRow').click();
   await fp.waitForFunction(()=>JSON.parse(localStorage.getItem('jz.config.v1')).lastFolderBackup>0);
+  assert.equal(await fp.locator('#backupLocationWarning').isVisible(),false);
   assert.equal((await savedBackups()).length,5);
   await fp.locator('#backupFolderRow').scrollIntoViewIfNeeded();
   await fp.locator('#toast').evaluate(el=>el.classList.remove('show'));
@@ -221,6 +243,7 @@ try{
   assert.equal((await savedBackups()).length,5);
   await fixed.context.close();
   results.push('fixed folder: cancel/select/write/persist/reload/automatic/permission recovery/failure cleanup/disable-preserve passed');
+  results.push('permission reminder: prompt without backup due stays quiet; denied/overdue/write failure still warn');
 
   const fallbackContext=await browser.newContext();
   await fallbackContext.addInitScript(({rows})=>{
