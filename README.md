@@ -4,7 +4,12 @@
 
 没有账号、没有网络请求、没有后端。所有数据只存在你手机浏览器的本地存储里。
 
-## 1.5.0 · 把日常账目整理得更清楚
+## 1.5.1 · 橙色主题与萌趣图标
+
+主题与深色模式改为暖橙色，应用图标、顶栏和锁屏使用用户提供的「萌趣理财账本」图片。
+保留 1.5.0 的记账、预算、搜索与备份功能，原有数据直接兼容。
+
+## 1.5.0 功能
 
 - **搜索与筛选**：按备注、分类、金额搜索，组合支出 / 收入与分类筛选；勾选「跨月查找」搜索历史账目。顶部月份可以直接选择。
 - **月度预算**：每个月单独设置支出预算，查看剩余额度、已用比例、日均可用金额与超支提示。搜索不会改变整月汇总和预算。
@@ -16,7 +21,7 @@
 
 旧版账本直接兼容，继续使用原来的网址即可。完整改动见 [CHANGELOG.md](CHANGELOG.md)。
 
-![1.5.0 桌面界面（演示数据）](screenshots/1.5.0-desktop.png)
+![1.5.1 桌面界面（演示数据）](screenshots/1.5.1-desktop.png)
 
 ```
 MoneyBook/
@@ -26,6 +31,7 @@ MoneyBook/
 ├── icon-192.png            ← 图标
 ├── icon-512.png
 ├── icon-maskable-512.png   ← 自适应图标（安卓圆形/方形裁切）
+├── assets/icon-source.png  ← 用户提供的图标原图（只用于生成图标，不随 dist 部署）
 ├── build.mjs               ← 打包出 dist/（可直接上传的静态站点）
 ├── serve.mjs               ← 零依赖局域网服务器，方便手机访问
 ├── gen-icons.mjs           ← 重新生成图标（纯 Node，无依赖）
@@ -202,7 +208,7 @@ node build.mjs        # 生成 dist/，里面是可直接上传的 7 个文件
 ```bash
 node check.mjs      # 功能回归：记账/编辑/撤销、搜索、预算、存储失败、密码锁、备份与 PWA
 node build.mjs      # 打包出 dist/（可直接上传的静态站点）
-node gen-icons.mjs  # 重新生成三个图标（自己画像素，无第三方依赖）
+node gen-icons.mjs  # 从 assets/icon-source.png 生成三个图标，无第三方依赖
 ```
 
 `check.mjs` 会把 `index.html` 里的**真实脚本**塞进一个小 DOM 桩里跑，
@@ -211,7 +217,7 @@ node gen-icons.mjs  # 重新生成三个图标（自己画像素，无第三方�
 可选的真实浏览器回归：本机已提供 Playwright 和 Microsoft Edge 时，先运行
 `node serve.mjs`，在另一个终端运行 `node browser-check.mjs`。
 它使用隔离的演示账本，检查不同屏幕宽度、离线重开、多窗口冲突和 1.4.3 升级兼容，
-并更新 `screenshots/1.5.0-*.png`。Playwright 只用于开发测试，不属于部署文件。
+并按当前版本更新 `screenshots/版本号-*.png`。Playwright 只用于开发测试，不属于部署文件。
 其他 Chromium 通道可通过 `MONEYBOOK_BROWSER_CHANNEL` 指定，测试站点可通过
 `MONEYBOOK_TEST_URL` 指定；升级测试需要本地 Git 历史包含 1.4.3 提交 `0ee95bd`。
 
@@ -222,7 +228,7 @@ node gen-icons.mjs  # 重新生成三个图标（自己画像素，无第三方�
 | 分类与 emoji | `index.html` 顶部的 `CATS` 对象（支出/收入各一组，`['名称','emoji']`） |
 | 图表配色 | `index.html` 里的 `PALETTE` 数组 |
 | 主题色 | `index.html` 的 `:root` 里 `--brand`，以及 `manifest.json` 的 `theme_color` |
-| 图标 | 改 `gen-icons.mjs` 里的颜色/字形，再 `node gen-icons.mjs` |
+| 图标 | 替换 `assets/icon-source.png`（8-bit RGB / RGBA PNG），再运行 `node gen-icons.mjs` |
 
 ### 改完之后怎么让手机拿到新版
 

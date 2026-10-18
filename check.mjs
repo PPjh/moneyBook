@@ -13,6 +13,7 @@ const html = readFileSync(join(DIR, 'index.html'), 'utf8');
 const m = html.match(/<script>([\s\S]*?)<\/script>/);
 if (!m) { console.error('✗ 没找到 <script> 块'); process.exit(1); }
 const script = m[1];
+const appVersion = (script.match(/var APP_VERSION = '([^']+)'/) || [])[1];
 const markup = html.slice(0, html.indexOf('<script>'));
 
 /** 按真实 HTML 建立静态元素表（含 hidden 初值），保证桩与页面一致 */
@@ -333,8 +334,13 @@ if (app) {
   ok(manifest.icons.some((i) => i.sizes === '512x512' && i.purpose === 'any'), 'manifest：含 512 图标');
   ok(manifest.icons.some((i) => i.purpose === 'maskable'), 'manifest：含 maskable 图标');
   for (const i of manifest.icons) {
-    ok(readFileSync(join(DIR, i.src)).subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])), '图标文件存在且是合法 PNG：' + i.src);
+    const png = readFileSync(join(DIR, i.src));
+    ok(png.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])), '图标文件存在且是合法 PNG：' + i.src);
+    const dimensions = i.sizes.split('x').map(Number);
+    eq(png.readUInt32BE(16), dimensions[0], '图标实际宽度与清单一致：' + i.src);
+    eq(png.readUInt32BE(20), dimensions[1], '图标实际高度与清单一致：' + i.src);
   }
+  eq(manifest.theme_color, (markup.match(/<meta name="theme-color" content="([^"]+)"/) || [])[1], '安装应用与网页的主题色一致');
   ok(readFileSync(join(DIR, 'sw.js'), 'utf8').includes("addEventListener('fetch'"), 'service worker 有 fetch 处理器（可离线）');
 }
 
@@ -924,7 +930,7 @@ if (app) {
   eq(cfgOf(a).theme, 'dark', '保存深色主题偏好');
   eq(a.documentShim.documentElement.dataset.theme, 'dark', '应用深色主题');
   const backup = a.windowShim.__jz.buildBackup();
-  eq(backup.appVersion, '1.5.0', '备份标识应用版本');
+  eq(backup.appVersion, appVersion, '备份标识应用版本');
   eq(backup.config.budgets['2026-10'], 300050, '备份包含月度预算');
   eq('pin' in backup.config, false, '新版备份仍排除密码');
   a.storage.failWrites = true;
@@ -1043,7 +1049,7 @@ if (app) {
   const cache = { addAll:async reqs=>{ if(failInstall) throw new Error('missing asset'); eq(reqs.length,6,'安装完整预缓存 6 个外壳地址'); }, put:async()=>{} };
   const shim = {
     self:{registration:{scope},addEventListener:(name,fn)=>handlers[name]=fn,skipWaiting:()=>{activated=true;},clients:{claim:async()=>{}}},
-    caches:{open:async()=>cache,keys:async()=>[prefix+'1.4.3',prefix+'1.5.0','another-app','jz-https://example.com/other/1.0.0'],delete:async name=>deleted.push(name),match:async(key,opts)=>{requestedCache=opts.cacheName;return cached?new Response('cached-page',{status:200}):undefined;}},
+    caches:{open:async()=>cache,keys:async()=>[prefix+'1.4.3',prefix+appVersion,'another-app','jz-https://example.com/other/1.0.0'],delete:async name=>deleted.push(name),match:async(key,opts)=>{requestedCache=opts.cacheName;return cached?new Response('cached-page',{status:200}):undefined;}},
     fetch:async()=>new Response('server-error',{status:500}),
     Request:class{constructor(url,opts){this.url=url;this.cache=opts.cache;}}, Response, URL, location:{origin:'https://example.com'}
   };
@@ -1061,7 +1067,7 @@ if (app) {
   const req={method:'GET',mode:'navigate',url:scope+'index.html'};
   handlers.fetch({request:req,respondWith:p=>response=p,waitUntil:p=>waited.push(p)});
   eq(await (await response).text(),'cached-page','服务器 500 时回退离线页面');
-  eq(requestedCache,prefix+'1.5.0','回退只查找当前版本缓存');
+  eq(requestedCache,prefix+appVersion,'回退只查找当前版本缓存');
   cached=false;
   handlers.fetch({request:req,respondWith:p=>response=p,waitUntil:p=>waited.push(p)});
   eq((await response).status,503,'没有缓存时返回明确的离线错误页');
