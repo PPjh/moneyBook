@@ -136,6 +136,108 @@ try{
   await concurrent.context.close();
   results.push('concurrency: stale tab cannot overwrite newer records');
 
+  // 选择器使用隔离的 OPFS 测试目录；写文件与 IndexedDB 句柄持久化走真实浏览器 API。
+  const fixed = await newTestPage({width:390,height:844}), fp = fixed.page;
+  async function savedBackups(){
+    return fp.evaluate(async()=>{
+      const root=await navigator.storage.getDirectory(), folder=await root.getDirectoryHandle('轻记账备份测试');
+      const out=[];
+      for await(const [name,handle] of folder.entries()){
+        if(handle.kind==='file'){const file=await handle.getFile();out.push({name,text:await file.text(),size:file.size});}
+      }
+      return out;
+    });
+  }
+  await fp.evaluate(()=>{
+    window.__cancelFolder=true;
+    window.showDirectoryPicker=async()=>{
+      if(window.__cancelFolder)throw new DOMException('cancelled','AbortError');
+      const root=await navigator.storage.getDirectory();return root.getDirectoryHandle('轻记账备份测试',{create:true});
+    };
+  });
+  await fp.locator('[data-view="me"]').click();
+  await fp.locator('#backupFolderRow').click();
+  assert.match(await fp.locator('#backupFolderInfo').innerText(),/尚未选择/);
+  await fp.evaluate(()=>window.__cancelFolder=false);
+  await fp.locator('#backupFolderRow').click();
+  await fp.waitForFunction(()=>document.getElementById('backupFolderInfo').textContent.includes('轻记账备份测试'));
+  await fp.locator('#backupNowRow').click();
+  await fp.waitForFunction(()=>JSON.parse(localStorage.getItem('jz.config.v1')).lastFolderBackup>0);
+  let saved=await savedBackups();
+  assert.equal(saved.length,1);assert.equal(JSON.parse(saved[0].text).records.length,rows.length);
+  assert.equal('pin' in JSON.parse(saved[0].text).config,false);
+  await fp.locator('#backupNowRow').click();
+  await fp.waitForFunction(()=>!document.getElementById('backupNowRow').disabled);
+  assert.equal((await savedBackups()).length,2);
+  await fp.reload({waitUntil:'networkidle'});
+  assert.match(await fp.locator('#backupFolderInfo').innerText(),/轻记账备份测试/);
+  await fp.locator('#backupNowRow').click();
+  await fp.waitForFunction(()=>!document.getElementById('backupNowRow').disabled);
+  assert.equal((await savedBackups()).length,3);
+  await fp.evaluate(()=>{
+    const cfg=JSON.parse(localStorage.getItem('jz.config.v1'));cfg.autoExport='daily';cfg.lastFolderBackup=0;
+    localStorage.setItem('jz.config.v1',JSON.stringify(cfg));
+  });
+  await fp.reload({waitUntil:'networkidle'});
+  await fp.waitForFunction(()=>JSON.parse(localStorage.getItem('jz.config.v1')).lastFolderBackup>0);
+  assert.equal((await savedBackups()).length,4);
+  await fp.addInitScript(()=>{
+    if(sessionStorage.getItem('test-folder-permission')==='prompt'){
+      window.__folderPermission='prompt';window.__permissionRequests=0;window.__permissionQueries=0;
+      FileSystemDirectoryHandle.prototype.queryPermission=async()=>{window.__permissionQueries++;return window.__folderPermission;};
+      FileSystemDirectoryHandle.prototype.requestPermission=async()=>{
+        window.__permissionRequests++;window.__folderPermission=window.__requestResult||'denied';return window.__folderPermission;
+      };
+    }
+  });
+  await fp.evaluate(()=>{
+    sessionStorage.setItem('test-folder-permission','prompt');
+    const cfg=JSON.parse(localStorage.getItem('jz.config.v1'));cfg.lastFolderBackup=0;localStorage.setItem('jz.config.v1',JSON.stringify(cfg));
+  });
+  await fp.reload({waitUntil:'networkidle'});
+  await fp.waitForFunction(()=>document.getElementById('backupFolderInfo').textContent.includes('需要重新授权'));
+  await fp.waitForFunction(()=>window.__permissionQueries>=2);
+  assert.equal(await fp.evaluate(()=>window.__permissionRequests),0);
+  assert.equal((await savedBackups()).length,4);
+  await fp.locator('#backupNowRow').click();
+  await fp.waitForFunction(()=>!document.getElementById('backupNowRow').disabled);
+  assert.equal(await fp.evaluate(()=>JSON.parse(localStorage.getItem('jz.config.v1')).lastFolderBackup),0);
+  assert.equal((await savedBackups()).length,4);
+  await fp.evaluate(()=>window.__requestResult='granted');
+  await fp.locator('#backupNowRow').click();
+  await fp.waitForFunction(()=>JSON.parse(localStorage.getItem('jz.config.v1')).lastFolderBackup>0);
+  assert.equal((await savedBackups()).length,5);
+  await fp.locator('#backupFolderRow').scrollIntoViewIfNeeded();
+  await fp.locator('#toast').evaluate(el=>el.classList.remove('show'));
+  await fp.screenshot({path:screenshot('backup'),fullPage:true});
+  const beforeFailure=await fp.evaluate(()=>JSON.parse(localStorage.getItem('jz.config.v1')).lastFolderBackup);
+  await fp.evaluate(()=>{FileSystemFileHandle.prototype.createWritable=async()=>{throw new DOMException('disk full','QuotaExceededError');};});
+  await fp.locator('#backupNowRow').click();
+  await fp.waitForFunction(()=>document.getElementById('toast').textContent.includes('备份失败'));
+  assert.equal(await fp.evaluate(()=>JSON.parse(localStorage.getItem('jz.config.v1')).lastFolderBackup),beforeFailure);
+  saved=await savedBackups();assert.equal(saved.length,5);assert.ok(saved.every(file=>file.size>0));
+  await fp.locator('#resetBackupFolderRow').click();
+  await fp.waitForFunction(()=>JSON.parse(localStorage.getItem('jz.config.v1')).backupTarget==='download');
+  assert.equal((await savedBackups()).length,5);
+  await fixed.context.close();
+  results.push('fixed folder: cancel/select/write/persist/reload/automatic/permission recovery/failure cleanup/disable-preserve passed');
+
+  const fallbackContext=await browser.newContext();
+  await fallbackContext.addInitScript(({rows})=>{
+    Object.defineProperty(window,'showDirectoryPicker',{value:undefined});
+    localStorage.setItem('jz.records.v1',JSON.stringify(rows));
+    localStorage.setItem('jz.config.v1',JSON.stringify({autoExport:'off',snapOn:false}));
+  },{rows});
+  const fallbackPage=await fallbackContext.newPage();
+  await fallbackPage.goto(baseURL,{waitUntil:'networkidle'});
+  await fallbackPage.locator('[data-view="me"]').click();
+  assert.match(await fallbackPage.locator('#backupFolderInfo').innerText(),/不支持固定文件夹/);
+  const download=fallbackPage.waitForEvent('download');
+  await fallbackPage.locator('#backupNowRow').click();
+  assert.ok((await download).suggestedFilename().endsWith('.json'));
+  await fallbackContext.close();
+  results.push('compatibility: unsupported browser explicitly falls back to download');
+
   // 在独立来源中先安装 Git 中的 1.4.3，再切换当前文件，验证真实旧缓存升级。
   const baseline = '0ee95bd';
   const oldIndex = execFileSync('git',['show',baseline+':index.html'],{cwd:dir});

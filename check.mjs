@@ -430,7 +430,7 @@ if (app) {
 
     step('立即备份并导出 JSON', () => bk.els.get('backupNowRow').onclick());
     eq(bk.files.length, 1, '触发了一次文件下载');
-    ok(/^轻记账-备份-\d{4}-\d{2}-\d{2}-\d{4}\.json$/.test(bk.files[0].name), '备份文件名带日期时间', bk.files[0].name);
+    ok(/^轻记账-备份-\d{4}-\d{2}-\d{2}-\d{6}-\d{3}\.json$/.test(bk.files[0].name), '备份文件名带日期、秒和毫秒，避免同一分钟内覆盖', bk.files[0].name);
     const exported = JSON.parse(bk.blobs[0]._text);
     eq(exported.app, '轻记账', '导出内容带应用标识');
     eq(exported.count, 3, '导出条数正确');

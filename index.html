@@ -406,6 +406,7 @@ body[data-view="stats"] .fab,body[data-view="me"] .fab{display:none}
   <div class="notice" id="storageWarning" role="alert" hidden>浏览器存储不可用，当前记录只在本次打开期间保留。请及时导出备份。</div>
   <div class="notice" id="conflictWarning" role="alert" hidden>账本已在另一个窗口更新。请重新加载后继续记账。<button id="reloadData">重新加载</button></div>
   <div class="notice" id="recoveryWarning" role="alert" hidden>检测到本机账本格式异常，请先导出原始数据，再从备份恢复。<button id="exportRaw">导出原始数据</button></div>
+  <div class="notice" id="backupLocationWarning" role="status" hidden><span id="backupLocationWarningText"></span><button id="openBackupSettings">设置备份</button></div>
 
   <div class="views" id="views">
     <!-- 明细 -->
@@ -512,12 +513,19 @@ body[data-view="stats"] .fab,body[data-view="me"] .fab{display:none}
       </div>
 
       <div class="card" style="padding:0;overflow:hidden;margin-bottom:14px">
+        <button class="setrow" id="backupFolderRow">
+          <div class="t">备份位置<small id="backupFolderInfo">正在读取备份位置…</small></div>
+          <div class="v" id="backupFolderAction">选择文件夹 ›</div>
+        </button>
+        <button class="setrow" id="resetBackupFolderRow" hidden>
+          <div class="t">停用固定文件夹<small>后续恢复普通下载，已保存的文件会保留</small></div><div class="v">›</div>
+        </button>
         <div class="setrow">
           <div class="t">自动快照<small id="snapInfo">每天首次打开自动存一份到本机</small></div>
           <button class="switch" id="snapSwitch" role="switch" aria-label="自动快照" aria-checked="true"></button>
         </div>
         <div class="setrow">
-          <div class="t">自动导出备份<small>按周期请求下载，请在浏览器下载记录中确认</small></div>
+          <div class="t">自动备份<small id="autoBackupHint">按周期保存到已选择的备份位置</small></div>
           <select id="autoExport" aria-label="自动导出备份周期" style="background:var(--bg);border-radius:10px;padding:8px 10px;font-size:14px">
             <option value="off">关闭</option>
             <option value="daily">每天</option>
@@ -526,8 +534,11 @@ body[data-view="stats"] .fab,body[data-view="me"] .fab{display:none}
           </select>
         </div>
         <button class="setrow" id="backupNowRow">
-          <div class="t">立即备份并导出<small id="lastExportInfo">还没有导出过</small></div>
+          <div class="t">立即备份<small id="lastExportInfo">还没有导出过</small></div>
           <div class="v">›</div>
+        </button>
+        <button class="setrow" id="downloadBackupRow" hidden>
+          <div class="t">另外下载一份<small>临时导出 JSON，不改变固定备份位置</small></div><div class="v">›</div>
         </button>
         <button class="setrow" id="restoreFileRow">
           <div class="t">从文件恢复<small>选择之前导出的 JSON 备份</small></div>
@@ -550,7 +561,7 @@ body[data-view="stats"] .fab,body[data-view="me"] .fab{display:none}
         </button>
       </div>
 
-      <div class="verline">轻记账 <span id="appVer">1.5.1</span> · 单文件 · 完全离线</div>
+      <div class="verline">轻记账 <span id="appVer">1.5.2</span> · 单文件 · 完全离线</div>
     </section>
   </div>
 
@@ -664,7 +675,7 @@ var PALETTE = ['#ed8a2d','#f4bb46','#d56545','#996fca','#6f9b69','#d88aaa','#72a
 var WEEK = ['日','一','二','三','四','五','六'];
 var TYPE_NAME = { expense:'支出', income:'收入' };
 /* 发布时同步此版本与 sw.js 缓存版本；界面和备份从此读取。 */
-var APP_VERSION = '1.5.1';
+var APP_VERSION = '1.5.2';
 var MAX_CENTS = 99999999999;
 
 function $(id){ return document.getElementById(id); }
@@ -831,7 +842,9 @@ var recordsBaseline = store.getItem(KEY_REC);
 
 var cfg = loadJSON(KEY_CFG, {});
 cfg = Object.assign({ pin:null, lockDelay:60000, lastCat:{ expense:'餐饮', income:'工资' },
-                      snapOn:true, autoExport:'weekly', lastSnap:'', lastExport:0, theme:'system', budgets:{} }, cfg);
+                      snapOn:true, autoExport:'weekly', lastSnap:'', lastExport:0, theme:'system', budgets:{},
+                      backupTarget:folderBackupSupported() ? 'folder' : 'download', lastFolderBackup:0 }, cfg);
+if(cfg.backupTarget !== 'folder') cfg.backupTarget = 'download';
 if(!cfg.lastCat || typeof cfg.lastCat !== 'object') cfg.lastCat = { expense:'餐饮', income:'工资' };
 if(!cfg.budgets || typeof cfg.budgets !== 'object' || Array.isArray(cfg.budgets)) cfg.budgets = {};
 if(cfg.pin && (typeof cfg.pin.salt !== 'string' || typeof cfg.pin.hash !== 'string' || !/^[4-6]$/.test(String(cfg.pin.len)))) cfg.pin = null;
@@ -1144,7 +1157,7 @@ function toCSV(){
 }
 function backupFileName(ext){
   var d = new Date();
-  return '轻记账-备份-' + ymd(d) + '-' + pad2(d.getHours()) + pad2(d.getMinutes()) + '.' + ext;
+  return '轻记账-备份-' + ymd(d) + '-' + pad2(d.getHours()) + pad2(d.getMinutes()) + pad2(d.getSeconds()) + '-' + String(d.getMilliseconds()).padStart(3,'0') + '.' + ext;
 }
 
 function downloadText(name, text, mime){
@@ -1240,7 +1253,7 @@ function snapListHTML(){
          '<button class="del" data-i="' + i + '" style="color:var(--brand)">恢复</button></div>';
   });
   return '<div class="card" style="padding:0;overflow:hidden">' + h + '</div>' +
-         '<div class="note-hint">快照只存在本机浏览器里，卸载应用或清除数据会一并消失；要真正保命请用「立即备份并导出」把文件存到手机里或发给自己。</div>';
+         '<div class="note-hint">快照保存在本机浏览器内，清除浏览器数据可能一并删除。请使用「立即备份」把文件保存到固定文件夹，也可以另外下载一份。</div>';
 }
 function openSnapList(){
   pending = null;
@@ -1279,17 +1292,161 @@ function openRestorePreview(rows, meta, fromSnap, idx){
 }
 function closePanel(){ hideModal('panel'); pending = null; $('restoreFileRow').focus(); }
 
-function doBackupNow(){
+/* ===================== 固定备份文件夹 ===================== */
+var backupDirectory = null, backupLocationReady = false, backupLocationError = '', backupPermissionNeeded = false, backupBusy = false, backupPicking = false;
+
+function folderBackupSupported(){
+  return !!(window.isSecureContext && typeof window.showDirectoryPicker === 'function' && window.indexedDB);
+}
+/* 目录句柄通过 IndexedDB 持久化，绝对路径和句柄不进入可导出的账本。 */
+function backupDirectoryStore(operation, handle){
+  return new Promise(function(resolve, reject){
+    var request = window.indexedDB.open('jz.backup.location.v1', 1), settled = false;
+    function fail(error){ if(!settled){ settled = true; reject(error || new Error('无法保存文件夹设置')); } }
+    request.onupgradeneeded = function(){ request.result.createObjectStore('locations'); };
+    request.onerror = function(){ fail(request.error); };
+    request.onblocked = function(){ fail(new Error('请关闭其他窗口后重新设置备份位置')); };
+    request.onsuccess = function(){
+      var db = request.result;
+      if(settled){ db.close(); return; }
+      try{
+        var transaction = db.transaction('locations', operation === 'get' ? 'readonly' : 'readwrite');
+        var store = transaction.objectStore('locations'), result;
+        var job = operation === 'get' ? store.get('directory') : operation === 'put' ? store.put(handle, 'directory') : store.delete('directory');
+        job.onsuccess = function(){ result = job.result; };
+        transaction.oncomplete = function(){ db.close(); if(!settled){ settled = true; resolve(result); } };
+        transaction.onerror = transaction.onabort = function(){ db.close(); fail(transaction.error); };
+      }catch(e){ db.close(); fail(e); }
+    };
+  });
+}
+async function restoreBackupDirectory(){
+  try{
+    if(folderBackupSupported() && cfg.backupTarget === 'folder'){
+      var handle = await backupDirectoryStore('get');
+      if(handle && handle.kind === 'directory'){
+        backupDirectory = handle;
+        backupPermissionNeeded = !handle.queryPermission || await handle.queryPermission({ mode:'readwrite' }) !== 'granted';
+      }
+    }
+  }catch(e){ backupLocationError = '位置读取失败，请重新选择文件夹'; }
+  backupLocationReady = true; renderBackupLocation();
+  if(cfg.backupTarget === 'folder') setTimeout(maybeAutoExport, 1500);
+}
+function renderBackupLocation(){
+  var supported = folderBackupSupported(), folderMode = cfg.backupTarget === 'folder';
+  $('backupFolderRow').disabled = !backupLocationReady || backupBusy || backupPicking;
+  $('backupFolderAction').textContent = !supported ? '普通下载' : backupDirectory && folderMode ? '更换 ›' : '选择文件夹 ›';
+  $('backupFolderInfo').textContent = !backupLocationReady ? '正在读取备份位置…' : backupLocationError ? (backupDirectory ? backupDirectory.name + ' · ' : '') + backupLocationError : (!supported ?
+    '当前浏览器不支持固定文件夹，请使用新版 Chrome；仍可下载备份' : folderMode ? (backupDirectory ?
+    backupDirectory.name + (backupPermissionNeeded ? ' · 需要重新授权，请点「立即备份」' : ' · 后续备份均保存到此文件夹') :
+    '尚未选择，点击设置手机上的固定文件夹') : '普通下载 · 可点击改为固定文件夹');
+  $('resetBackupFolderRow').hidden = !folderMode || !backupDirectory;
+  $('downloadBackupRow').hidden = !folderMode;
+  $('autoBackupHint').textContent = folderMode ? '打开应用或解锁时按周期写入固定文件夹，授权失效会提示' : '按周期请求下载，请在浏览器下载记录中确认';
+  $('lastExportInfo').textContent = folderMode ? (cfg.lastFolderBackup ? '上次成功备份 ' + stamp(cfg.lastFolderBackup) : '还没有写入固定文件夹') :
+    (cfg.lastExport ? '上次导出 ' + stamp(cfg.lastExport) : '还没有导出过');
+  $('backupNowRow').disabled = backupBusy || backupPicking || !backupLocationReady;
+  $('resetBackupFolderRow').disabled = backupBusy || backupPicking;
+  var attention = folderMode && backupLocationReady && (!supported || backupLocationError || !backupDirectory || backupPermissionNeeded);
+  $('backupLocationWarning').hidden = !(attention && records.length && (cfg.autoExport !== 'off' || backupDirectory));
+  $('backupLocationWarningText').textContent = backupLocationError || (!supported ? '当前浏览器不支持固定文件夹，请升级 Chrome 或临时下载备份。' :
+    !backupDirectory ? '尚未选择固定备份文件夹，请设置后启用文件备份。' : '固定文件夹备份需要重新授权，请在「我的」点击「立即备份」。');
+}
+async function chooseBackupDirectory(){
+  if(state.locked || backupBusy || backupPicking) return false;
+  if(!folderBackupSupported()){ toast('当前浏览器不支持固定文件夹，请使用新版 Chrome；可先下载备份'); return false; }
+  backupPicking = true; renderBackupLocation();
+  try{
+    // 先在点击手势中唤起选择器，之后再执行异步持久化。
+    var handle = await window.showDirectoryPicker({ id:'moneybook-backup', mode:'readwrite', startIn:backupDirectory || 'downloads' });
+    await backupDirectoryStore('put', handle);
+    var previousTarget = cfg.backupTarget, previousTime = cfg.lastFolderBackup;
+    cfg.backupTarget = 'folder'; cfg.lastFolderBackup = 0;
+    if(!persistCfg()){
+      cfg.backupTarget = previousTarget; cfg.lastFolderBackup = previousTime;
+      await backupDirectoryStore(backupDirectory ? 'put' : 'delete', backupDirectory);
+      return false;
+    }
+    backupDirectory = handle; backupPermissionNeeded = false; backupLocationError = '';
+    renderBackupLocation(); toast('备份位置已固定为「' + handle.name + '」'); return true;
+  }catch(e){
+    if(e.name !== 'AbortError') toast('备份位置未能保存，请检查浏览器权限后重试');
+    return false;
+  }finally{ backupPicking = false; renderBackupLocation(); }
+}
+async function resetBackupDirectory(){
+  if(backupBusy || !confirm('停用固定备份位置并恢复普通下载？文件夹中的已有备份会保留。')) return;
+  var previous = cfg.backupTarget; cfg.backupTarget = 'download';
+  if(!persistCfg()){ cfg.backupTarget = previous; return; }
+  backupDirectory = null; backupPermissionNeeded = false; backupLocationError = '';
+  try{ await backupDirectoryStore('delete'); }catch(e){} // 已停用，不再访问旧位置。
+  renderBackupLocation(); toast('已恢复普通下载，原有备份文件已保留');
+}
+async function backupToDirectory(manual){
+  if(state.locked || backupBusy || !records.length || !backupLocationReady) return false;
+  if(!backupDirectory){
+    if(!manual || !await chooseBackupDirectory()) return false;
+  }
+  backupBusy = true; renderBackupLocation();
+  var writable, createdFileName = null;
+  try{
+    var permission = backupDirectory.queryPermission ? await backupDirectory.queryPermission({ mode:'readwrite' }) : 'prompt';
+    if(permission !== 'granted' && manual && backupDirectory.requestPermission){
+      permission = await backupDirectory.requestPermission({ mode:'readwrite' });
+    }
+    if(permission !== 'granted'){
+      backupPermissionNeeded = true; if(manual) toast('尚未获得写入权限，请重新授权或更换备份文件夹'); return false;
+    }
+    if(state.locked) return false;
+    var text = backupJSON(), count = records.length;
+    if(manual) snapshot('manual');
+    var fileName = backupFileName('json').replace(/\.json$/, '-' + uid().slice(-5) + '.json');
+    // 不覆盖历史备份；同名时另取名称。
+    for(var attempt=0;attempt<5;attempt++){
+      try{ await backupDirectory.getFileHandle(fileName); fileName = backupFileName('json').replace(/\.json$/, '-' + uid() + '.json'); }
+      catch(e){ if(e.name === 'NotFoundError') break; throw e; }
+      if(attempt === 4) throw new Error('无法生成新的备份文件名，请重试');
+    }
+    var file = await backupDirectory.getFileHandle(fileName, { create:true }); createdFileName = fileName;
+    writable = await file.createWritable();
+    await writable.write(text); await writable.close(); writable = null; createdFileName = null;
+    cfg.lastFolderBackup = Date.now(); cfg.lastExport = cfg.lastFolderBackup;
+    var settingsSaved = persistCfg();
+    backupPermissionNeeded = false; backupLocationError = '';
+    if(!state.locked) toast('已备份 ' + count + ' 条到「' + backupDirectory.name + '」' + (settingsSaved ? '' : '；备份时间未能保存'));
+    return true;
+  }catch(e){
+    if(writable && writable.abort){ try{ await writable.abort(); }catch(abortError){} }
+    if(createdFileName){ try{ await backupDirectory.removeEntry(createdFileName); }catch(cleanupError){} }
+    if(e.name === 'NotAllowedError' || e.name === 'SecurityError') backupPermissionNeeded = true;
+    backupLocationError = e.name === 'QuotaExceededError' ? '设备存储空间不足，请释放空间后重试' :
+      e.name === 'NotFoundError' ? '文件夹已移动或删除，请重新选择' : backupPermissionNeeded ? '缺少写入权限，请重新授权' : '备份未完成，请检查文件夹或存储空间后重试';
+    if(!state.locked) toast('备份失败：' + backupLocationError);
+    return false;
+  }finally{ backupBusy = false; renderBackupLocation(); }
+}
+function downloadBackupCopy(updateTime){
   if(!records.length){ toast('还没有记录可备份'); return; }
   snapshot('manual');
   if(downloadText(backupFileName('json'), backupJSON(), 'application/json')){
-    cfg.lastExport = Date.now(); persistCfg(); renderMe();
+    if(updateTime){ cfg.lastExport = Date.now(); persistCfg(); }
+    renderMe();
     toast('已请求导出 ' + records.length + ' 条，请确认下载文件');
   }
+}
+function doBackupNow(){
+  if(!records.length){ toast('还没有记录可备份'); return; }
+  if(cfg.backupTarget === 'folder') return backupToDirectory(true);
+  downloadBackupCopy(true);
 }
 function maybeAutoExport(){
   var iv = EXPORT_MS[cfg.autoExport] || 0;
   if(!iv || !records.length || state.locked) return;
+  if(cfg.backupTarget === 'folder'){
+    if(!backupLocationReady || !backupDirectory || Date.now() - (cfg.lastFolderBackup || 0) < iv) return;
+    return backupToDirectory(false);
+  }
   if(Date.now() - (cfg.lastExport || 0) < iv) return;
   if(downloadText(backupFileName('json'), backupJSON(), 'application/json')){
     cfg.lastExport = Date.now(); persistCfg(); renderMe();
@@ -1335,6 +1492,7 @@ function renderMe(){
   $('lockDelayRow').style.opacity = cfg.pin ? '1' : '.45';
   $('lockDelay').value = String(cfg.lockDelay);
   $('lockDelay').disabled = !cfg.pin;
+  renderBackupLocation();
 }
 
 /* ===================== 记账面板 ===================== */
@@ -1691,6 +1849,10 @@ $('autoExport').onchange = function(){
   toast(this.value === 'off' ? '已关闭自动导出' : '已开启自动导出');
 };
 $('backupNowRow').onclick = doBackupNow;
+$('backupFolderRow').onclick = chooseBackupDirectory;
+$('resetBackupFolderRow').onclick = resetBackupDirectory;
+$('downloadBackupRow').onclick = function(){ downloadBackupCopy(false); };
+$('openBackupSettings').onclick = function(){ switchView('me'); $('backupFolderRow').focus(); };
 $('csvRow').onclick = function(){
   if(!records.length){ toast('还没有记录可导出'); return; }
   if(downloadText(backupFileName('csv'), toCSV(), 'text/csv')) toast('CSV 已导出（' + records.length + ' 条）');
@@ -1810,6 +1972,7 @@ renderList(); renderStats(); renderMe();
 var hashView = (location.hash || '').replace('#','');
 if(hashView === 'stats' || hashView === 'me') switchView(hashView);
 if(cfg.pin) lockNow();
+restoreBackupDirectory();
 
 /* 每天首次打开自动存一份快照；到期的自动导出延迟执行，别和首屏抢资源 */
 if(cfg.snapOn !== false && records.length && cfg.lastSnap !== todayStr()){
