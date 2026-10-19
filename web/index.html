@@ -33,6 +33,7 @@
   --brand:#ffae64;--brand-fg:#321907;--brand-soft:#4c2d15;--hero-start:#f7b35b;--hero-end:#e48a3a;--hero-fg:#351a08;--exp:#ff8c73;--inc:#77d4a5;--shadow:0 4px 20px rgba(0,0,0,.18)}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{margin:0;padding:0;height:100%}
+html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
 body{
   font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",system-ui,sans-serif;
   background:var(--bg);color:var(--fg);font-size:16px;line-height:1.5;
@@ -364,22 +365,36 @@ body[data-view="stats"] .fab,body[data-view="me"] .fab{display:none}
   .brandmark{gap:8px}.brandmark small{display:none}.brandmark .mark{width:32px;height:32px;border-radius:11px}.brandmark strong{font-size:17px}
   .topbar{padding-top:calc(var(--safe-t) + 6px);padding-bottom:6px}
   .view{padding-top:4px}.overview{gap:8px}
-  .summary{padding:12px 16px;border-radius:18px}
-  .summary .eyebrow{font-size:10px;line-height:1.2;letter-spacing:1px;margin-bottom:4px}
-  .summary .lbl{font-size:12px;line-height:1.4}
-  .summary .big{font-size:30px;line-height:1.15;margin:3px 0 8px}
-  .summary .split{font-size:11px;line-height:1.35}.summary .split b{font-size:14px}
-  .budget-card{padding:10px 14px}.budget-head strong{font-size:13px}.budget-head button{font-size:11px;padding-top:4px;padding-bottom:4px}
-  .budget-value{font-size:20px;line-height:1.2;margin:2px 0}
-  .budget-track{height:5px;margin:8px 0 6px}.budget-caption,.budget-foot{font-size:11px;line-height:1.35}
+  /* Keep the same compact structure across phone widths; never clip monetary values. */
+  .summary{display:grid;grid-template-columns:auto minmax(0,1fr);gap:8px 10px;padding:12px 14px;border-radius:18px}
+  .summary .eyebrow{display:none}
+  .summary .lbl{font-size:12px;line-height:1.4;align-self:center}
+  .summary .big{min-width:0;text-align:right;font-size:clamp(26px,7.2vw,30px);font-weight:600;line-height:1.2;margin:0}
+  .summary .big small{font-size:16px}
+  .summary .split{grid-column:1/-1;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;padding-top:8px;border-top:1px solid rgba(72,38,15,.12);font-size:11px;line-height:1.35}
+  .summary .split>div{min-width:0}.summary .split b{font-size:clamp(12px,3.4vw,14px);font-weight:600;overflow-wrap:anywhere}
+  .summary .split>div:last-child{text-align:right}
+  .budget-card{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:10px;align-items:center;padding:10px 14px}
+  .budget-head{grid-column:1/-1;min-height:28px;margin-bottom:4px}.budget-head strong{font-size:13px}.budget-head button{font-size:11px;min-height:28px;padding-top:4px;padding-bottom:4px;white-space:nowrap}
+  .budget-value{min-width:0;font-size:clamp(17px,4.8vw,20px);font-weight:600;line-height:1.25;margin:0}
+  .budget-caption{text-align:right;overflow-wrap:anywhere}
+  .budget-track{grid-column:1/-1;height:4px;margin:6px 0 5px}.budget-caption,.budget-foot{font-size:11px;line-height:1.35}
+  .budget-foot,.budget-form{grid-column:1/-1}.budget-foot{gap:4px}
+  .list-tools{margin-top:14px;gap:8px}.searchbox{min-height:40px;padding:8px 10px}
+  .filters{display:grid;grid-template-columns:minmax(0,1fr) 88px auto;gap:6px}
+  .filter-seg{min-width:0;gap:2px}.filter-seg button{flex:1;min-width:0;min-height:40px;padding:7px 4px;font-size:12px}
+  .filters select{width:88px;max-width:100%;min-width:0;min-height:40px;padding:6px 4px;font-size:12px}
+  .check-label{min-height:40px;gap:4px;font-size:11px}.check-label input{margin:0;width:16px;height:16px;flex:0 0 16px}
+  .list-heading{margin-top:16px}.rec{padding:12px 14px}
+  .empty{padding:32px 16px}.empty .e{font-size:32px}
+  .fab{height:48px;border-radius:16px;padding:0 16px;font-size:23px}.fab span{font-size:13px}
   .statgrid .card{padding:10px 12px}.statgrid .lbl{font-size:12px}.statgrid .val{font-size:17px;line-height:1.25;margin-top:1px;overflow-wrap:anywhere}
   .h2{margin-top:18px}
 }
 @media(max-width:380px){
   .topbar{padding-left:16px;padding-right:16px}.brandmark small{display:none}.brandmark .mark{width:32px;height:32px}
   .brandmark strong{font-size:16px}.month-controls{gap:4px}.monthnav .mlabel{min-width:83px;font-size:13px}.monthnav button{width:25px}
-  .today-btn{font-size:12px;padding:8px}.view{padding-left:12px;padding-right:12px}.filters{gap:6px}.filter-seg button{padding:7px 10px}
-  .check-label{order:3;width:100%}.summary .big{font-size:28px}
+  .today-btn{font-size:12px;padding:8px}.view{padding-left:12px;padding-right:12px}
 }
 @media(min-width:640px){
   .topbar{padding:24px 30px 18px}.view{padding:10px 30px 100px}.overview{grid-template-columns:1.2fr 1fr;gap:18px}
@@ -694,7 +709,7 @@ var PALETTE = ['#ed8a2d','#f4bb46','#d56545','#996fca','#6f9b69','#d88aaa','#72a
 var WEEK = ['日','一','二','三','四','五','六'];
 var TYPE_NAME = { expense:'支出', income:'收入' };
 /* 发布时同步此版本与 sw.js 缓存版本；界面和备份从此读取。 */
-var APP_VERSION = '1.5.4';
+var APP_VERSION = '1.5.5';
 var MAX_CENTS = 99999999999;
 
 function $(id){ return document.getElementById(id); }

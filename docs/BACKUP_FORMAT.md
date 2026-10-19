@@ -1,7 +1,7 @@
 # Web 与安卓 JSON 备份格式
 
 本说明来自现有 `web/index.html` 的 `buildBackup()`、`normalizeRows()` 与 `parseBackupText()`，
-以及安卓 `Ledger.java`，描述 Web 1.5.4 与安卓 1.1.1 的兼容规则。
+以及安卓 `Ledger.java`，描述 Web 1.5.5 与安卓 1.1.2 的兼容规则。
 安卓核心解析／导出已通过 JVM 测试；系统文件访问和设备迁移仍需真机验收。
 
 ## 导出结构
@@ -36,7 +36,7 @@
 ```
 
 `version` 是备份格式版本，与软件版本 `appVersion` 不同。
-安卓当前导出的 `appVersion` 为 `android-1.1.1`，其余主要字段与 Web 相同。
+安卓当前导出的 `appVersion` 为 `android-1.1.2`，其余主要字段与 Web 相同。
 `count` 是记录数，`range` 是记录日期的最早、最晚值，空账本导出时为 `null`。
 `exportedAt` 是 ISO 时间；记录的 `date` 是本地日历日期，不应转换时区导致日期变化。
 

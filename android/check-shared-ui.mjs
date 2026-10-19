@@ -40,8 +40,8 @@ await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 const origin = `http://127.0.0.1:${server.address().port}`;
 const browser = await chromium.launch({headless:true, channel:process.env.MONEYBOOK_BROWSER_CHANNEL || 'msedge'});
 const results = [], errors = [];
-async function context(native, pin = null) {
-  const ctx = await browser.newContext({viewport:{width:390,height:844},colorScheme:'light',reducedMotion:'reduce'});
+async function context(native, pin = null, options = {}) {
+  const ctx = await browser.newContext({viewport:options.viewport || {width:390,height:844},deviceScaleFactor:options.deviceScaleFactor || 1,colorScheme:'light',reducedMotion:'reduce'});
   await ctx.addInitScript(({native,rows,config,pin,version}) => {
     if(!native) {
       if(!localStorage.getItem('jz.records.v1')) {
@@ -101,7 +101,7 @@ async function context(native, pin = null) {
         }catch(e){save();window.__moneybookResolve(id,{ok:false,error:e.message});}
       },0)
     };
-  },{native,rows,config,pin,version});
+  },{native,rows:options.rows || rows,config:{...config,...options.config},pin,version});
   const page = await ctx.newPage();page.on('pageerror',e=>errors.push(e.message));page.on('dialog',d=>d.accept());
   await page.goto(origin+(native?'/native/':'/web/'),{waitUntil:'networkidle'});
   return {ctx,page};
@@ -114,10 +114,10 @@ try {
   });
   results.push({mobileLayout:layout});
   assert.ok(layout.header.height <= 54, 'mobile header should stay compact');
-  assert.ok(layout.summary.height <= 146, 'monthly summary should not consume the first screen');
-  assert.ok(layout.budget.height <= 130, 'monthly budget should stay compact');
-  assert.ok(layout.overview.height <= 284, 'combined summary and budget must be smaller than the old 367px');
-  assert.ok(layout.details.top <= 480, 'details heading should move up from the old 574px');
+  assert.ok(layout.summary.height <= 110, 'monthly label and amount share a compact row');
+  assert.ok(layout.budget.height <= 120, 'budget amount and caption share a row');
+  assert.ok(layout.overview.height <= 238, 'combined cards must be smaller than 1.1.1 (268px)');
+  assert.ok(layout.details.top <= 405, 'details should be visible much earlier than 1.1.1 (457px)');
   for(const name of ['details','statistics','entry','dark']) {
     if(name==='statistics')for(const x of [web,native])await x.page.locator('[data-view="stats"]').click();
     if(name==='entry')for(const x of [web,native]){await x.page.locator('[data-view="list"]').click();await x.page.locator('#fab').click();}
@@ -148,11 +148,40 @@ try {
   assert.equal(await p.evaluate(month=>window.__nativeHarness.config.budgets[month],month),900000);
   results.push('native document import -> shared preview -> confirmed native replacement includes budgets');
   await web.ctx.close();await native.ctx.close();
-  for(const width of [320,360,390,412,600]) {
+  const phoneLayouts = [];
+  async function checkPhone(page, name, compact = true) {
+    const metrics = await page.evaluate(() => {
+      const box = selector => { const r=document.querySelector(selector).getBoundingClientRect();return {top:r.top,height:r.height,left:r.left,right:r.right}; };
+      const selectors=['#sumExp','#sumInc','#sumBal','#sumCnt','#budgetValue','#budgetCaption','#budgetUsage','#budgetDaily','#categoryFilter','.check-label'];
+      return {width:innerWidth,header:box('.topbar'),summary:box('.summary'),budget:box('.budget-card'),overview:box('.overview'),details:box('.list-heading'),
+        filters:['.filter-seg','#categoryFilter','.check-label'].map(box),
+        amounts:selectors.map(selector=>{const el=document.querySelector(selector);return {selector,...box(selector),fits:el.scrollWidth<=el.clientWidth+1};})};
+    });
+    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true,'no horizontal overflow: '+name);
+    assert.ok(metrics.header.height<=54,'single-row header: '+name);
+    assert.ok(Math.max(...metrics.filters.map(x=>x.top))-Math.min(...metrics.filters.map(x=>x.top))<=1,'all filters must share one row: '+name);
+    for(const cell of metrics.amounts) {
+      assert.ok(cell.fits,cell.selector+' must wrap rather than clip: '+name);
+      assert.ok(cell.left>=0 && cell.right<=metrics.width+1,cell.selector+' stays onscreen: '+name);
+    }
+    if(compact) {
+      assert.ok(metrics.overview.height<=244,'compact cards: '+name);
+      assert.ok(metrics.details.top<=410,'details remain near the top: '+name);
+    }
+    return metrics;
+  }
+  for(const width of [320,344,360,375,380,381,390,412,430,480,600,639]) {
     const test=await context(true), page=test.page;
-    await page.setViewportSize({width,height:844});
-    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true,'no horizontal overflow at '+width);
-    assert.ok((await page.locator('.topbar').boundingBox()).height<=54,'single-row header at '+width);
+    await page.setViewportSize({width,height:width<=380?740:844});
+    phoneLayouts.push(await checkPhone(page,width+'px'));
+    if([360,390].includes(width))await page.screenshot({path:join(output,version+'-'+width+'px.png')});
+    await page.locator('#allMonths').check();await page.locator('#allMonths').uncheck();
+    await page.locator('#categoryFilter').selectOption('饮品');assert.equal(await page.locator('#listCount').innerText(),'1 笔记录');
+    await page.locator('#categoryFilter').selectOption('');
+    await page.locator('#editBudget').click();
+    assert.equal(await page.locator('#budgetInput').isVisible(),true,'budget editor visible at '+width);
+    assert.ok((await page.locator('#budgetForm').boundingBox()).width>(await page.locator('.budget-card').boundingBox()).width-40,'budget editor spans the entire card');
+    await page.locator('#cancelBudget').click();
     await page.addStyleTag({content:':root{--safe-t:28px;--safe-b:24px}'});
     assert.equal(await page.locator('.topbar').evaluate(el=>getComputedStyle(el).paddingTop),'6px','native host must not add CSS safe-area padding a second time');
     assert.equal(await page.locator('.tabbar').evaluate(el=>getComputedStyle(el).paddingBottom),'9px','native navigation safe area must not be duplicated');
@@ -162,11 +191,37 @@ try {
     assert.equal(await page.locator('#sheetSave').isVisible(),true,'entry save visible at '+width);
     await test.ctx.close();
   }
+  results.push({phoneLayouts});
+  for(const width of [320,360,390]) {
+    for(const scenario of ['empty','overspent','large']) {
+      const exampleRows=scenario==='empty'?[]:scenario==='overspent'?[{...rows[0],amount:800000}]:[{...rows[0],amount:99999999999},{...rows[2],amount:99999999999}];
+      const test=await context(true,null,{viewport:{width,height:740},rows:exampleRows,config:{budgets:scenario==='empty'?{}:{[month]:600000}}});
+      await checkPhone(test.page,width+'px / '+scenario,scenario!=='large');
+      if(scenario==='overspent')assert.match(await test.page.locator('#budgetCaption').innerText(),/已超出预算/);
+      if(scenario==='large')assert.equal(await test.page.locator('#sumExp').innerText(),'¥999,999,999.99');
+      if(width===360&&scenario==='empty')await test.page.screenshot({path:join(output,version+'-empty.png')});
+      await test.ctx.close();
+    }
+  }
+  for(const [width,scale] of [[360,3.375],[390,2.75]]) {
+    const test=await context(true,null,{viewport:{width,height:740},deviceScaleFactor:scale});
+    await test.page.addStyleTag({content:'.summary .big,.summary .split b,.budget-value,.brandmark strong{font-weight:700}'});
+    await checkPhone(test.page,width+'px / density '+scale+' / bold');
+    await test.ctx.close();
+  }
+  for(const width of [640,768,960,1440]) {
+    const test=await context(false,null,{viewport:{width,height:1000}});
+    assert.equal(await test.page.locator('.overview').evaluate(el=>getComputedStyle(el).gridTemplateColumns.split(' ').length),2,'desktop keeps two cards at '+width);
+    assert.ok((await test.page.locator('.summary').boundingBox()).height>=225,'desktop summary is not forced into phone layout');
+    if(width===1440)await test.page.screenshot({path:join(output,version+'-desktop.png')});
+    await test.ctx.close();
+  }
   const safeWeb=await context(false);
   await safeWeb.page.addStyleTag({content:':root{--safe-t:28px;--safe-b:24px}'});
   assert.equal(await safeWeb.page.locator('.topbar').evaluate(el=>getComputedStyle(el).paddingTop),'34px','PWA must retain its own safe area');
   await safeWeb.ctx.close();
-  results.push('compact 320/360/390/412/600 layouts; Android CSS avoids duplicate safe areas while PWA retains them');
+  results.push('320–639px: compact cards and single-row filters; zero/unset, overspent, large amounts, bold and two density factors; 640/768/960/1440px desktop preserved');
+  results.push('Android CSS avoids duplicate safe areas while PWA retains them');
   const legacy=await context(true,{value:'123456',known:false});
   assert.equal(await legacy.page.locator('#lock').isVisible(),true);
   for(const digit of '123456')await legacy.page.locator('#pad').getByRole('button',{name:digit,exact:true}).click();
@@ -178,5 +233,6 @@ try {
   results.push('legacy native 6-digit PIN with initially unknown length unlocks; reload and lifecycle resume lock again');
   await legacy.ctx.close();assert.deepEqual(errors,[]);
   writeFileSync(join(output,'results.json'),JSON.stringify({version,results,errors},null,2));
-  console.log(JSON.stringify({version,results,errors},null,2));
+  const summary=results.map(result=>result.phoneLayouts?{phoneLayouts:result.phoneLayouts.map(({width,overview,details})=>({width,cardsHeight:overview.height,detailsTop:details.top}))}:result);
+  console.log(JSON.stringify({version,results:summary,errors},null,2));
 } finally {await browser.close();await new Promise(resolve=>server.close(resolve));}
