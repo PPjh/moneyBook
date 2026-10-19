@@ -33,7 +33,7 @@ function makeEl(id) {
   return {
     id, value: '', textContent: '', innerHTML: '', hidden: false, disabled: false,
     scrollTop: 0, dataset: {}, style: {}, onclick: null, onchange: null, children: [],
-    _h: {},
+    _h: {}, _attrs: {},
     classList: {
       add: (c) => cls.add(c),
       remove: (c) => cls.delete(c),
@@ -41,7 +41,9 @@ function makeEl(id) {
       toggle: (c, f) => { const on = f === undefined ? !cls.has(c) : !!f; on ? cls.add(c) : cls.delete(c); return on; }
     },
     addEventListener(type, fn) { this._h[type] = fn; },
-    setAttribute() {}, removeAttribute() {}, focus() {}, blur() {}, appendChild() {},
+    setAttribute(name, value) { this._attrs[name] = String(value); },
+    getAttribute(name) { return this._attrs[name] ?? null; },
+    removeAttribute(name) { delete this._attrs[name]; }, focus() {}, blur() {}, appendChild() {},
     closest() { return null; }, querySelectorAll() { return []; }
   };
 }
@@ -896,6 +898,38 @@ if (app) {
   eq(e.get('listCount').textContent, '1 笔记录', '搜索不区分大小写');
   e.get('searchInput').value = '18.00'; fireInput(e.get('searchInput'));
   eq(e.get('listCount').textContent, '1 笔记录', '支持金额搜索');
+  const searchUi=runApp({seed}), se=searchUi.els;
+  eq(se.get('searchPopover').hidden,true,'搜索框默认隐藏，不占页面位置');
+  se.get('toggleSearch').onclick();
+  eq(se.get('searchPopover').hidden,false,'放大镜展开搜索框');
+  eq(se.get('toggleSearch').getAttribute('aria-expanded'),'true','搜索展开状态提供给辅助阅读');
+  se.get('searchInput').value='午饭';fireInput(se.get('searchInput'));
+  eq(se.get('listCount').textContent,'1 笔记录','弹出框输入实时筛选');
+  eq(se.get('toggleSearch').classList.contains('has-query'),true,'有关键词时图标保留筛选标记');
+  ok(se.get('filterInfo').textContent.includes('关键词：“午饭”'),'收起搜索后仍能看见当前关键词');
+  se.get('searchInput')._h.keydown({key:'Enter',preventDefault(){}});
+  eq(se.get('searchPopover').hidden,true,'搜索键收起弹出框');
+  eq(se.get('listCount').textContent,'1 笔记录','收起搜索不清除筛选条件');
+  se.get('toggleSearch').onclick();
+  searchUi.docHandlers.keydown({key:'Escape',preventDefault(){}});
+  eq(se.get('searchPopover').hidden,true,'Escape 收起搜索框');
+  eq(se.get('searchInput').value,'午饭','重新打开可继续编辑原关键词');
+  se.get('toggleSearch').onclick();
+  searchUi.docHandlers.click({target:{closest(){return null;}}});
+  eq(se.get('searchPopover').hidden,true,'点击空白处收起搜索框');
+  se.get('toggleSearch').onclick();
+  searchUi.docHandlers.focusin({target:{closest(){return null;}}});
+  eq(se.get('searchPopover').hidden,true,'键盘焦点离开搜索区时收起');
+  se.get('toggleSearch').onclick();se.get('clearSearch').onclick();
+  eq(se.get('toggleSearch').classList.contains('has-query'),false,'清除关键词后去掉图标标记');
+  eq(se.get('listCount').textContent,'3 笔记录','清除后恢复月份全部明细');
+  se.get('closeSearch').onclick();
+  eq(se.get('toggleSearch').getAttribute('aria-expanded'),'false','关闭按钮同步辅助阅读状态');
+  se.get('toggleSearch').onclick();
+  se.get('searchInput').value='不存在';fireInput(se.get('searchInput'));
+  fire(se.get('listBox'),'click',{action:'reset'});
+  eq(se.get('searchPopover').hidden,true,'空结果清除筛选时关闭搜索框');
+  eq(se.get('searchInput').value,'','重置筛选清空关键词');
   const many = Array.from({ length:205 }, (_, i) => ({ id:'many'+i, date:todayLocal(), amount:100, cat:'餐饮' }));
   const b = runApp({ seed:{ 'jz.records.v1':JSON.stringify(many), 'jz.config.v1':JSON.stringify({ autoExport:'off', snapOn:false }) } });
   eq((b.els.get('listBox').innerHTML.match(/class="rec"/g) || []).length, 100, '长列表首屏最多 100 条');

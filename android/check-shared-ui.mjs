@@ -110,15 +110,17 @@ try {
   const web = await context(false), native = await context(true), p = native.page;
   const layout = await p.evaluate(() => {
     const box = selector => { const r=document.querySelector(selector).getBoundingClientRect(); return {top:r.top,height:r.height}; };
-    return {header:box('.topbar'),summary:box('.summary'),budget:box('.budget-card'),overview:box('.overview'),details:box('.list-heading')};
+    return {header:box('.topbar'),summary:box('.summary'),budget:box('.budget-card'),overview:box('.overview'),details:box('.list-heading'),record:box('.rec')};
   });
   results.push({mobileLayout:layout});
   assert.ok(layout.header.height <= 54, 'mobile header should stay compact');
   assert.ok(layout.summary.height <= 110, 'monthly label and amount share a compact row');
   assert.ok(layout.budget.height <= 120, 'budget amount and caption share a row');
   assert.ok(layout.overview.height <= 238, 'combined cards must be smaller than 1.1.1 (268px)');
-  assert.ok(layout.details.top <= 405, 'details should be visible much earlier than 1.1.1 (457px)');
-  for(const name of ['details','statistics','entry','dark']) {
+  assert.ok(layout.details.top <= 365, 'collapsed search must not reserve a full search row');
+  assert.ok(layout.record.height>=52 && layout.record.height<=60, 'slightly smaller rows retain a comfortable touch target');
+  for(const name of ['details','search','statistics','entry','dark']) {
+    if(name==='search')for(const x of [web,native]){await x.page.locator('#toggleSearch').click();await x.page.locator('#searchInput').fill('午餐');}
     if(name==='statistics')for(const x of [web,native])await x.page.locator('[data-view="stats"]').click();
     if(name==='entry')for(const x of [web,native]){await x.page.locator('[data-view="list"]').click();await x.page.locator('#fab').click();}
     if(name==='dark')for(const x of [web,native]){await x.page.locator('#sheetCancel').click();await x.page.locator('[data-view="me"]').click();await x.page.locator('#themeSelect').selectOption('dark');await x.page.locator('[data-view="list"]').click();}
@@ -126,7 +128,41 @@ try {
     const a=await web.page.screenshot({path:join(output,'web-'+name+'.png')}),b=await p.screenshot({path:join(output,'android-'+name+'.png')});
     assert.equal(createHash('sha256').update(a).digest('hex'),createHash('sha256').update(b).digest('hex'),name+' screenshot must match Web pixel-for-pixel in the same browser');
     results.push(name+': shared Web/native-adapter screenshots are pixel-identical at 390 × 844');
+    if(name==='search')for(const x of [web,native]){await x.page.locator('#clearSearch').click();await x.page.locator('#closeSearch').click();}
   }
+  for(const x of [web,native]) {
+    const page=x.page;
+    assert.equal(await page.locator('#searchPopover').isVisible(),false);
+    await page.locator('#toggleSearch').click();
+    assert.equal(await page.locator('#searchInput').evaluate(el=>el===document.activeElement),true);
+    await page.locator('#searchInput').fill('午餐');
+    assert.equal(await page.locator('#listCount').innerText(),'1 笔记录');
+    assert.equal(await page.locator('#sumExp').innerText(),'¥56.00','search never changes the monthly amount');
+    await page.keyboard.press('Enter');
+    assert.equal(await page.locator('#searchPopover').isVisible(),false);
+    assert.equal(await page.locator('#toggleSearch').evaluate(el=>el.classList.contains('has-query')),true);
+    assert.match(await page.locator('#filterInfo').innerText(),/午餐/);
+    await page.locator('#toggleSearch').click();assert.equal(await page.locator('#searchInput').inputValue(),'午餐');
+    await page.keyboard.press('Escape');
+    assert.equal(await page.locator('#searchPopover').isVisible(),false);
+    assert.equal(await page.locator('#toggleSearch').evaluate(el=>el===document.activeElement),true);
+    await page.locator('#toggleSearch').click();await page.locator('#summaryLabel').click();
+    assert.equal(await page.locator('#searchPopover').isVisible(),false,'outside click dismisses popup');
+    await page.locator('#toggleSearch').click();await page.locator('#clearSearch').click();
+    assert.equal(await page.locator('#listCount').innerText(),'3 笔记录');
+    assert.equal(await page.locator('#toggleSearch').evaluate(el=>el.classList.contains('has-query')),false);
+    await page.keyboard.press('Tab');await page.keyboard.press('Tab');
+    assert.equal(await page.locator('#searchPopover').isVisible(),false,'keyboard can leave the non-modal search popup');
+    await page.locator('#toggleSearch').click();await page.locator('[data-view="stats"]').click();
+    assert.equal(await page.locator('#searchPopover').isVisible(),false,'switching pages dismisses search');
+    await page.locator('[data-view="list"]').click();
+    if(x===native) {
+      await page.locator('#toggleSearch').click();
+      assert.equal(await page.evaluate(()=>window.MoneyBookPlatform.back()),true,'native back first closes search');
+      assert.equal(await page.locator('#searchPopover').isVisible(),false);
+    }
+  }
+  results.push('search popup: hidden by default, focus, live filtering, active marker, Enter/Escape/outside/Tab/view-change dismissal, query preservation, clear and native back');
   await p.locator('#fab').click();await p.locator('#amt').fill('12.5+3');await p.locator('#note').fill('共享界面新增');await p.locator('#sheetSave').click();
   assert.equal(await p.evaluate(()=>window.__nativeHarness.records.length),4);
   assert.equal(await p.evaluate(()=>window.__nativeHarness.records.find(r=>r.id==='existing-native-a').amount),3800);
@@ -154,6 +190,7 @@ try {
       const box = selector => { const r=document.querySelector(selector).getBoundingClientRect();return {top:r.top,height:r.height,left:r.left,right:r.right}; };
       const selectors=['#sumExp','#sumInc','#sumBal','#sumCnt','#budgetValue','#budgetCaption','#budgetUsage','#budgetDaily','#categoryFilter','.check-label'];
       return {width:innerWidth,header:box('.topbar'),summary:box('.summary'),budget:box('.budget-card'),overview:box('.overview'),details:box('.list-heading'),
+        record:document.querySelector('.rec')?box('.rec'):null,
         filters:['.filter-seg','#categoryFilter','.check-label'].map(box),
         amounts:selectors.map(selector=>{const el=document.querySelector(selector);return {selector,...box(selector),fits:el.scrollWidth<=el.clientWidth+1};})};
     });
@@ -166,8 +203,9 @@ try {
     }
     if(compact) {
       assert.ok(metrics.overview.height<=244,'compact cards: '+name);
-      assert.ok(metrics.details.top<=410,'details remain near the top: '+name);
+      assert.ok(metrics.details.top<=365,'details remain near the top: '+name);
     }
+    if(metrics.record)assert.ok(metrics.record.height>=52 && metrics.record.height<=60,'record rows remain compact and tappable: '+name);
     return metrics;
   }
   for(const width of [320,344,360,375,380,381,390,412,430,480,600,639]) {
@@ -175,6 +213,17 @@ try {
     await page.setViewportSize({width,height:width<=380?740:844});
     phoneLayouts.push(await checkPhone(page,width+'px'));
     if([360,390].includes(width))await page.screenshot({path:join(output,version+'-'+width+'px.png')});
+    await page.locator('#toggleSearch').click();
+    const popup=await page.locator('#searchPopover').boundingBox();
+    assert.ok(popup.x>=0 && popup.x+popup.width<=width,'search popup remains inside phone screen');
+    assert.equal(await page.locator('#searchInput').evaluate(el=>el===document.activeElement),true);
+    if(width===360)await page.screenshot({path:join(output,version+'-search.png')});
+    await page.locator('#searchInput').fill('x'.repeat(80));
+    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true,'long query stays onscreen');
+    await page.locator('#clearSearch').click();await page.locator('#closeSearch').click();
+    assert.equal(await page.locator('.rec .mid .c').first().evaluate(el=>getComputedStyle(el).fontSize),'14px');
+    assert.equal(await page.locator('.rec .mid .n').first().evaluate(el=>getComputedStyle(el).fontSize),'11.5px');
+    assert.equal(await page.locator('.rec .amt').first().evaluate(el=>getComputedStyle(el).fontSize),'15px');
     await page.locator('#allMonths').check();await page.locator('#allMonths').uncheck();
     await page.locator('#categoryFilter').selectOption('饮品');assert.equal(await page.locator('#listCount').innerText(),'1 笔记录');
     await page.locator('#categoryFilter').selectOption('');
@@ -192,6 +241,12 @@ try {
     await test.ctx.close();
   }
   results.push({phoneLayouts});
+  const short=await context(true,null,{viewport:{width:360,height:480}});
+  await short.page.locator('#toggleSearch').click();
+  assert.equal(await short.page.locator('#searchInput').evaluate(el=>{
+    const r=el.getBoundingClientRect();return document.elementFromPoint(r.left+r.width/2,r.top+r.height/2)===el;
+  }),true,'search input remains reachable in a short viewport');
+  await short.ctx.close();
   for(const width of [320,360,390]) {
     for(const scenario of ['empty','overspent','large']) {
       const exampleRows=scenario==='empty'?[]:scenario==='overspent'?[{...rows[0],amount:800000}]:[{...rows[0],amount:99999999999},{...rows[2],amount:99999999999}];
