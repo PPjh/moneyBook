@@ -33,7 +33,7 @@ Web 工作流按 `web/`、自身配置及公共 Git 规则的变化触发检查�
 
 安卓工作流按 `android/`、Web 界面／图标及自身配置变化触发测试、lint 和 debug APK 构建；不自动发布正式版本。
 本机已生成测试 APK，26 项 JVM 核心测试、共享界面截图比对和适配桩测试通过，仍需完成手机验收。
-标准 Gradle／CI 检查尚未实际执行，详见 [安卓验证清单](../android/TESTING.md)。
+首轮云端标准 Gradle／CI 检查已执行成功，设备验收仍待完成，详见 [安卓验证清单](../android/TESTING.md)。
 
 正式 APK 使用稳定签名并发布到 GitHub Releases，避免把安装包积累在源码提交中。
 包名固定为 `io.github.ppjh.moneybook`，发布更新时递增 `versionCode` 并更新 `versionName`。
@@ -46,6 +46,16 @@ Web 工作流按 `web/`、自身配置及公共 Git 规则的变化触发检查�
 根目录 `.gitignore` 已忽略常见备份文件名、`backups/`、构建缓存与签名配置，
 但忽略规则不是安全审计；每次提交前仍需检查文件，尤其是自行更名的备份。
 签名密钥需要独立安全保存；用户账目需要另行导出备份，GitHub 源码仓库不替代账目备份。
+
+## 首次云端验证
+
+2026-10-19，源码提交 [`333fc12`](https://github.com/PPjh/moneyBook/commit/333fc12f648f37d5286a10a8375b0d749338c6bc)：
+
+- [Web 检查与 Pages 发布成功](https://github.com/PPjh/moneyBook/actions/runs/39206678613)，只发布 `web/dist/`，保持原站点路径。
+- [Android 标准测试、lint 和 APK 构建成功](https://github.com/PPjh/moneyBook/actions/runs/39206678570)，构建产物保留 14 天，不写入源码历史。
+- Pages 发布来源已从 `main / (root)` 切换为 GitHub Actions。
+
+这些结果仅对应该源码提交，不代替后续提交的检查或安卓真机验收。CI debug APK 的签名可能不同于本机测试包，不要为安装签名不同的包直接卸载现有应用。
 
 ## 两端数据兼容
 

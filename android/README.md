@@ -74,7 +74,7 @@ node android/build-native.mjs --sdk "D:\CodexSpace\.android-toolchain\sdk" --jdk
 真实浏览器中，明细／统计／记账面板／深色的两端截图在相同 390 × 844 尺寸下逐像素一致。
 原生适配脚本的存储、PIN、备份、取消及恢复预览通过浏览器桩测试；桩测试不等于实际系统权限验证。
 已新增 320／360／390／412／600 宽度、紧凑卡片和模拟安全区检查，PWA 仍保留自己的安全区避让。
-本机模拟器缺少硬件加速，未完成启动；尚未完成新版真机覆盖升级及 Gradle lint／标准构建，不能视为正式发布版。
+本机模拟器缺少硬件加速，未完成启动。首轮 [GitHub Actions 标准 Gradle 测试、lint 与 APK 构建](https://github.com/PPjh/moneyBook/actions/runs/39206678570) 已通过；真机覆盖升级仍未完成，不能视为正式发布版。
 验收项目见 [TESTING.md](TESTING.md)。
 
 界面测试（需安装 Playwright 与可启动的 Edge／Chromium）：

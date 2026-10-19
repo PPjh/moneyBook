@@ -47,7 +47,7 @@ node web/serve.mjs   # 本地预览 http://localhost:8080/
 [Web 工作流](.github/workflows/web-pages.yml) 会检查、打包并发布 `web/dist/` 的内容，
 不发布整个仓库，也不发布安卓目录。
 
-首次采用此结构时，先导出账目备份，再按 [部署说明](web/DEPLOY.md) 将
+本仓库已启用 GitHub Actions 发布。新建副本首次采用此结构时，先导出账目备份，再按 [部署说明](web/DEPLOY.md) 将
 **Settings → Pages → Source** 切换为 **GitHub Actions**，并运行 **Web checks and Pages**。
 保持原有域名、仓库名和站点路径，手机网址不要添加 `/web/`。
 
@@ -57,7 +57,8 @@ node web/serve.mjs   # 本地预览 http://localhost:8080/
 数据库、PIN、系统目录授权、文件备份和快照由安卓处理，不依赖浏览器存储或网络。
 已实现记账、预算、统计、PIN、固定文件夹备份、CSV 导出、JSON 恢复和本机快照。
 本地 APK 编译及签名校验通过，26 项核心测试和 418 项 Web 自检通过，四种界面的同尺寸浏览器截图逐像素一致。
-尚未完成新版模拟器／真机验收和 Gradle lint；界面测试不代替原生权限测试。
+首轮云端标准 Gradle 单元测试、lint 和 APK 构建已通过，Web 检查与 Pages 部署也已通过，详见 [验证记录](docs/PROJECT_MANAGEMENT.md#首次云端验证)。
+尚未完成新版模拟器／真机验收；界面或云端构建测试不代替原生权限测试。
 两端独立发布，例如 `web-v1.5.4`、`android-v1.1.1`。两端源码统一提交到本仓库，构建与发布状态以 GitHub Actions 实际结果为准。
 测试签名不能当作正式发布签名；密钥需另行安全保存，不提交到源码仓库。
 
