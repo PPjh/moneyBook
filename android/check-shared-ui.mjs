@@ -1,0 +1,182 @@
+/* Real-browser parity and native-adapter contract checks. This does not emulate Android's OS APIs. */
+import assert from 'node:assert/strict';
+import { createRequire } from 'node:module';
+import { createServer } from 'node:http';
+import { readFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { createHash } from 'node:crypto';
+const root = dirname(fileURLToPath(import.meta.url));
+const require = createRequire(import.meta.url);
+const { chromium } = require('playwright');
+const output = join(root, 'app/build/ui-checks'); mkdirSync(output, { recursive: true });
+const source = readFileSync(join(root, '../web/index.html'), 'utf8');
+const adapter = readFileSync(join(root, 'app/src/main/web/native-adapter.js'), 'utf8');
+const version = readFileSync(join(root, 'app/build.gradle'), 'utf8').match(/versionName '([^']+)'/)[1];
+const date = new Date(), month = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+const rows = [
+  { id:'existing-native-a', type:'expense', amount:3800, cat:'餐饮', note:'午餐 · 一碗热腾腾的面', date:month+'-18', ts:10 },
+  { id:'existing-native-b', type:'expense', amount:1800, cat:'饮品', note:'下午的一杯拿铁', date:month+'-18', ts:9 },
+  { id:'existing-native-c', type:'income', amount:850000, cat:'工资', note:'认真生活的底气', date:month+'-16', ts:8 }
+];
+const config = { theme:'light', snapOn:false, autoExport:'off', backupTarget:'folder', budgets:{[month]:400000}, lastCat:{expense:'餐饮',income:'工资'}, lastFolderBackup:0, lastExport:0, lockDelay:60000, pin:null };
+const server = createServer((request, response) => {
+  const path = new URL(request.url, 'http://localhost').pathname;
+  if (path === '/native/' || path === '/web/') {
+    const native = path === '/native/';
+    const html = native ? source.replace('<script>', '<script nonce="test-nonce" src="native-adapter.js"></script><script nonce="test-nonce">') : source;
+    const headers = {'content-type':'text/html; charset=utf-8','cache-control':'no-store'};
+    if(native) headers['content-security-policy'] = "default-src 'none'; script-src 'nonce-test-nonce'; style-src 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'";
+    response.writeHead(200, headers).end(html); return;
+  }
+  if (path === '/native/native-adapter.js') { response.writeHead(200, {'content-type':'text/javascript'}).end(adapter); return; }
+  const name = path.split('/').pop();
+  if (['icon-192.png','icon-512.png','icon-maskable-512.png','manifest.json','sw.js'].includes(name)) {
+    response.writeHead(200, {'content-type':name.endsWith('.png')?'image/png':name.endsWith('.js')?'text/javascript':'application/json'}).end(readFileSync(join(root,'../web',name))); return;
+  }
+  response.writeHead(404).end();
+});
+await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+const origin = `http://127.0.0.1:${server.address().port}`;
+const browser = await chromium.launch({headless:true, channel:process.env.MONEYBOOK_BROWSER_CHANNEL || 'msedge'});
+const results = [], errors = [];
+async function context(native, pin = null) {
+  const ctx = await browser.newContext({viewport:{width:390,height:844},colorScheme:'light',reducedMotion:'reduce'});
+  await ctx.addInitScript(({native,rows,config,pin,version}) => {
+    if(!native) {
+      if(!localStorage.getItem('jz.records.v1')) {
+        localStorage.setItem('jz.records.v1',JSON.stringify(rows)); localStorage.setItem('jz.config.v1',JSON.stringify(config));
+      } return;
+    }
+    const state = JSON.parse(sessionStorage.getItem('native-harness') || 'null') || {records:rows,config,pin,snapshots:[],folder:{selected:true,name:'轻记账备份',granted:true,error:''},files:[]};
+    window.__nativeHarness = state;
+    const save = () => sessionStorage.setItem('native-harness',JSON.stringify(state));
+    const publicPin = () => state.pin ? {salt:'native',hash:'native',len:state.pin.known?state.pin.value.length:4,native:true,unknownLength:!state.pin.known} : null;
+    function call(op,a) {
+      if(op==='info') return {version};
+      if(op==='get') {
+        if(a.key==='jz.records.v1') return JSON.stringify(state.records);
+        if(a.key==='jz.config.v1') return JSON.stringify({...state.config,pin:publicPin()}); return null;
+      }
+      if(op==='set') {
+        if(a.key==='jz.records.v1') { if(a.expected!==JSON.stringify(state.records)) throw Error('账本已更新'); state.records=JSON.parse(a.value); }
+        else { state.config=JSON.parse(a.value); delete state.config.pin; } save(); return true;
+      }
+      if(op==='theme'||op==='ready'||op==='lock') return true;
+      if(op==='folder') return state.folder;
+      if(op==='snapshots') return state.snapshots;
+      if(op==='snapshot') {
+        const snapshot={nativeId:'snapshot-'+Date.now(),ts:Date.now(),date:new Date().toISOString().slice(0,10),reason:a.reason,n:state.records.length,total:5600,rows:JSON.parse(JSON.stringify(state.records)),config:{budgets:state.config.budgets}};
+        state.snapshots.unshift(snapshot);state.snapshots=state.snapshots.slice(0,10);save();return snapshot;
+      }
+      if(op==='retainSnapshots') {state.snapshots=state.snapshots.filter(s=>a.keep.includes(s.nativeId));save();return true;}
+      if(op==='pinVerify') {const valid=state.pin&&state.pin.value===a.pin;if(valid)state.pin.known=true;save();return !!valid;}
+      if(op==='pinSet') {state.pin={value:a.pin,known:true};save();return publicPin();}
+      if(op==='pinDisable') {state.pin=null;save();return true;}
+      if(op==='import') {
+        if(a.expected!==JSON.stringify(state.records))throw Error('账本已更新');
+        const before=state.records.length;
+        if(a.mode==='replace'){state.records=a.rows;state.config.budgets=a.config.budgets||{};}
+        else {const have=new Set(state.records.map(r=>r.id));state.records.push(...a.rows.filter(r=>!have.has(r.id)));}
+        save();return {ok:true,before,after:state.records.length,added:state.records.length-before,budgetSaved:true};
+      }
+      throw Error('Unsupported operation: '+op);
+    }
+    window.MoneyBookNative = {
+      call:(op,args)=>{try{return JSON.stringify({ok:true,value:call(op,JSON.parse(args))});}catch(e){return JSON.stringify({ok:false,error:e.message});}},
+      request:(id,op,args)=>setTimeout(()=>{
+        try {
+          const a=JSON.parse(args);let value=true;
+          if(state.cancelNext){state.cancelNext=false;throw Error('已取消');}
+          if(op==='backup') {
+            if(state.failBackup)throw Error('设备存储空间不足');
+            state.files.push({text:JSON.stringify({records:state.records,config:{budgets:state.config.budgets}})});
+            state.config.lastFolderBackup=Date.now();state.config.lastExport=state.config.lastFolderBackup;
+          }
+          if(op==='chooseFolder'){state.folder={selected:true,name:'新备份目录',granted:true,error:''};state.config.backupTarget='folder';state.config.lastFolderBackup=0;value=state.folder;}
+          if(op==='forgetFolder'){state.folder={selected:false,name:'',granted:false};state.config.backupTarget='download';}
+          if(op==='saveFile')state.files.push(a);
+          if(op==='importFile')value=state.importText;
+          save();window.__moneybookResolve(id,{ok:true,value});
+        }catch(e){save();window.__moneybookResolve(id,{ok:false,error:e.message});}
+      },0)
+    };
+  },{native,rows,config,pin,version});
+  const page = await ctx.newPage();page.on('pageerror',e=>errors.push(e.message));page.on('dialog',d=>d.accept());
+  await page.goto(origin+(native?'/native/':'/web/'),{waitUntil:'networkidle'});
+  return {ctx,page};
+}
+try {
+  const web = await context(false), native = await context(true), p = native.page;
+  const layout = await p.evaluate(() => {
+    const box = selector => { const r=document.querySelector(selector).getBoundingClientRect(); return {top:r.top,height:r.height}; };
+    return {header:box('.topbar'),summary:box('.summary'),budget:box('.budget-card'),overview:box('.overview'),details:box('.list-heading')};
+  });
+  results.push({mobileLayout:layout});
+  assert.ok(layout.header.height <= 54, 'mobile header should stay compact');
+  assert.ok(layout.summary.height <= 146, 'monthly summary should not consume the first screen');
+  assert.ok(layout.budget.height <= 130, 'monthly budget should stay compact');
+  assert.ok(layout.overview.height <= 284, 'combined summary and budget must be smaller than the old 367px');
+  assert.ok(layout.details.top <= 480, 'details heading should move up from the old 574px');
+  for(const name of ['details','statistics','entry','dark']) {
+    if(name==='statistics')for(const x of [web,native])await x.page.locator('[data-view="stats"]').click();
+    if(name==='entry')for(const x of [web,native]){await x.page.locator('[data-view="list"]').click();await x.page.locator('#fab').click();}
+    if(name==='dark')for(const x of [web,native]){await x.page.locator('#sheetCancel').click();await x.page.locator('[data-view="me"]').click();await x.page.locator('#themeSelect').selectOption('dark');await x.page.locator('[data-view="list"]').click();}
+    await Promise.all([web.page,native.page].map(page=>page.waitForTimeout(300)));
+    const a=await web.page.screenshot({path:join(output,'web-'+name+'.png')}),b=await p.screenshot({path:join(output,'android-'+name+'.png')});
+    assert.equal(createHash('sha256').update(a).digest('hex'),createHash('sha256').update(b).digest('hex'),name+' screenshot must match Web pixel-for-pixel in the same browser');
+    results.push(name+': shared Web/native-adapter screenshots are pixel-identical at 390 × 844');
+  }
+  await p.locator('#fab').click();await p.locator('#amt').fill('12.5+3');await p.locator('#note').fill('共享界面新增');await p.locator('#sheetSave').click();
+  assert.equal(await p.evaluate(()=>window.__nativeHarness.records.length),4);
+  assert.equal(await p.evaluate(()=>window.__nativeHarness.records.find(r=>r.id==='existing-native-a').amount),3800);
+  await p.reload({waitUntil:'networkidle'});assert.equal(await p.locator('#listCount').innerText(),'4 笔记录');
+  results.push('existing native IDs/amounts preserved; add and reload use the native storage adapter');
+  await p.locator('[data-view="me"]').click();await p.locator('#backupNowRow').click();
+  await p.waitForFunction(()=>window.__nativeHarness.files.length===1);
+  const success=await p.evaluate(()=>window.__nativeHarness.config.lastFolderBackup);assert.ok(success>0);
+  await p.evaluate(()=>window.__nativeHarness.failBackup=true);await p.locator('#backupNowRow').click();
+  await p.waitForFunction(()=>document.getElementById('toast').textContent.includes('备份失败'));
+  assert.equal(await p.evaluate(()=>window.__nativeHarness.config.lastFolderBackup),success);
+  await p.evaluate(()=>{window.__nativeHarness.cancelNext=true;});await p.locator('#backupFolderRow').click();
+  await p.waitForFunction(()=>!document.getElementById('backupFolderRow').disabled);
+  assert.match(await p.locator('#backupFolderInfo').innerText(),/轻记账备份/);
+  results.push('native fixed-folder route: write success, failure leaves success time, cancelling preserves old folder');
+  await p.evaluate(({month})=>{window.__nativeHarness.importText=JSON.stringify({records:[{id:'imported',type:'income',amount:123400,cat:'工资',note:'导入',date:month+'-18',ts:1}],config:{budgets:{[month]:900000},pin:'must-not-import'}});},{month});
+  await p.locator('#restoreFileRow').click();await p.waitForFunction(()=>document.getElementById('panel').classList.contains('show'));
+  await p.locator('#panelReplace').click();assert.equal(await p.evaluate(()=>window.__nativeHarness.records[0].id),'imported');
+  assert.equal(await p.evaluate(month=>window.__nativeHarness.config.budgets[month],month),900000);
+  results.push('native document import -> shared preview -> confirmed native replacement includes budgets');
+  await web.ctx.close();await native.ctx.close();
+  for(const width of [320,360,390,412,600]) {
+    const test=await context(true), page=test.page;
+    await page.setViewportSize({width,height:844});
+    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true,'no horizontal overflow at '+width);
+    assert.ok((await page.locator('.topbar').boundingBox()).height<=54,'single-row header at '+width);
+    await page.addStyleTag({content:':root{--safe-t:28px;--safe-b:24px}'});
+    assert.equal(await page.locator('.topbar').evaluate(el=>getComputedStyle(el).paddingTop),'6px','native host must not add CSS safe-area padding a second time');
+    assert.equal(await page.locator('.tabbar').evaluate(el=>getComputedStyle(el).paddingBottom),'9px','native navigation safe area must not be duplicated');
+    await page.locator('[data-view="stats"]').click();
+    assert.ok((await page.locator('.statgrid .card').first().boundingBox()).height<=74,'compact statistics at '+width);
+    await page.locator('[data-view="list"]').click();await page.locator('#fab').click();
+    assert.equal(await page.locator('#sheetSave').isVisible(),true,'entry save visible at '+width);
+    await test.ctx.close();
+  }
+  const safeWeb=await context(false);
+  await safeWeb.page.addStyleTag({content:':root{--safe-t:28px;--safe-b:24px}'});
+  assert.equal(await safeWeb.page.locator('.topbar').evaluate(el=>getComputedStyle(el).paddingTop),'34px','PWA must retain its own safe area');
+  await safeWeb.ctx.close();
+  results.push('compact 320/360/390/412/600 layouts; Android CSS avoids duplicate safe areas while PWA retains them');
+  const legacy=await context(true,{value:'123456',known:false});
+  assert.equal(await legacy.page.locator('#lock').isVisible(),true);
+  for(const digit of '123456')await legacy.page.locator('#pad').getByRole('button',{name:digit,exact:true}).click();
+  await legacy.page.locator('[data-k="ok"]').click();await legacy.page.waitForFunction(()=>document.getElementById('lock').hidden);
+  await legacy.page.reload({waitUntil:'networkidle'});assert.equal(await legacy.page.locator('#lock').isVisible(),true);
+  for(const digit of '123456')await legacy.page.locator('#pad').getByRole('button',{name:digit,exact:true}).click();
+  await legacy.page.waitForFunction(()=>document.getElementById('lock').hidden);
+  await legacy.page.evaluate(()=>window.MoneyBookPlatform.resume(true));assert.equal(await legacy.page.locator('#lock').isVisible(),true);
+  results.push('legacy native 6-digit PIN with initially unknown length unlocks; reload and lifecycle resume lock again');
+  await legacy.ctx.close();assert.deepEqual(errors,[]);
+  writeFileSync(join(output,'results.json'),JSON.stringify({version,results,errors},null,2));
+  console.log(JSON.stringify({version,results,errors},null,2));
+} finally {await browser.close();await new Promise(resolve=>server.close(resolve));}

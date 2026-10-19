@@ -22,6 +22,8 @@
   --exp:#cd4731; --inc:#27815f; --shadow:0 1px 2px rgba(83,43,16,.05),0 8px 24px rgba(83,43,16,.05);
   --r:16px; --safe-b:env(safe-area-inset-bottom,0px); --safe-t:env(safe-area-inset-top,0px);
 }
+/* The Android host already pads the WebView around system bars, cutouts and the keyboard. */
+:root[data-platform="android"]{--safe-t:0px;--safe-b:0px}
 @media (prefers-color-scheme: dark){
   :root:not([data-theme="light"]){ color-scheme:dark; --bg:#1c1510; --card:#2a2018; --fg:#fff0e4; --muted:#bcaa9b; --line:#443326;
     --brand:#ffae64; --brand-fg:#321907; --brand-soft:#4c2d15; --hero-start:#f7b35b; --hero-end:#e48a3a; --hero-fg:#351a08; --exp:#ff8c73; --inc:#77d4a5;
@@ -360,14 +362,24 @@ body[data-view="stats"] .fab,body[data-view="me"] .fab{display:none}
 .verline{margin-top:24px}
 @media(max-width:639px){
   .brandmark{gap:8px}.brandmark small{display:none}.brandmark .mark{width:32px;height:32px;border-radius:11px}.brandmark strong{font-size:17px}
-  .topbar{padding-top:calc(var(--safe-t) + 14px);padding-bottom:12px}.summary{padding:20px}.summary .big{font-size:35px;margin-bottom:14px}
-  .budget-card{padding:15px 18px}.budget-value{font-size:23px;margin:4px 0 2px}.budget-track{margin:12px 0 8px}.budget-caption,.budget-foot{font-size:11px}
+  .topbar{padding-top:calc(var(--safe-t) + 6px);padding-bottom:6px}
+  .view{padding-top:4px}.overview{gap:8px}
+  .summary{padding:12px 16px;border-radius:18px}
+  .summary .eyebrow{font-size:10px;line-height:1.2;letter-spacing:1px;margin-bottom:4px}
+  .summary .lbl{font-size:12px;line-height:1.4}
+  .summary .big{font-size:30px;line-height:1.15;margin:3px 0 8px}
+  .summary .split{font-size:11px;line-height:1.35}.summary .split b{font-size:14px}
+  .budget-card{padding:10px 14px}.budget-head strong{font-size:13px}.budget-head button{font-size:11px;padding-top:4px;padding-bottom:4px}
+  .budget-value{font-size:20px;line-height:1.2;margin:2px 0}
+  .budget-track{height:5px;margin:8px 0 6px}.budget-caption,.budget-foot{font-size:11px;line-height:1.35}
+  .statgrid .card{padding:10px 12px}.statgrid .lbl{font-size:12px}.statgrid .val{font-size:17px;line-height:1.25;margin-top:1px;overflow-wrap:anywhere}
+  .h2{margin-top:18px}
 }
 @media(max-width:380px){
   .topbar{padding-left:16px;padding-right:16px}.brandmark small{display:none}.brandmark .mark{width:32px;height:32px}
   .brandmark strong{font-size:16px}.month-controls{gap:4px}.monthnav .mlabel{min-width:83px;font-size:13px}.monthnav button{width:25px}
   .today-btn{font-size:12px;padding:8px}.view{padding-left:12px;padding-right:12px}.filters{gap:6px}.filter-seg button{padding:7px 10px}
-  .check-label{order:3;width:100%}.summary .big{font-size:34px}
+  .check-label{order:3;width:100%}.summary .big{font-size:28px}
 }
 @media(min-width:640px){
   .topbar{padding:24px 30px 18px}.view{padding:10px 30px 100px}.overview{grid-template-columns:1.2fr 1fr;gap:18px}
@@ -561,7 +573,7 @@ body[data-view="stats"] .fab,body[data-view="me"] .fab{display:none}
         </button>
       </div>
 
-      <div class="verline">轻记账 <span id="appVer">1.5.3</span> · 单文件 · 完全离线</div>
+      <div class="verline">轻记账 <span id="appVer">1.5.4</span> · 单文件 · 完全离线</div>
     </section>
   </div>
 
@@ -642,10 +654,17 @@ body[data-view="stats"] .fab,body[data-view="me"] .fab{display:none}
 <script>
 (function(){
 'use strict';
+// Android bundles this same page; only persistence and OS integration are platform-specific.
+var platform = window.MoneyBookPlatform || null;
+if(window.MoneyBookNative && !platform){
+  document.body.textContent = '安卓本机服务未能加载，已停止写入。请重开应用；不要卸载或清除数据。';
+  throw new Error('Native adapter unavailable');
+}
 
 /* ===================== 存储 ===================== */
 var mem = {}, storageOK = true, readErrors = {};
 var store = (function(){
+  if(platform) return platform.storage; // Never silently fall back to browser/temporary storage on Android.
   try{ localStorage.getItem('__jz_t'); return localStorage; }
   catch(e){ storageOK = false; return { getItem:function(k){ return Object.prototype.hasOwnProperty.call(mem,k)?mem[k]:null; },
                      setItem:function(k,v){ mem[k]=String(v); }, removeItem:function(k){ delete mem[k]; } }; }
@@ -659,7 +678,7 @@ function loadJSON(key, fallback){
 }
 function saveJSON(key, val){
   try{ store.setItem(key, JSON.stringify(val)); return true; }
-  catch(e){ toast('保存失败：本机存储空间已满'); return false; }
+  catch(e){ toast(platform ? '保存失败：' + e.message : '保存失败：本机存储空间已满'); return false; }
 }
 
 /* ===================== 常量 / 工具 ===================== */
@@ -675,7 +694,7 @@ var PALETTE = ['#ed8a2d','#f4bb46','#d56545','#996fca','#6f9b69','#d88aaa','#72a
 var WEEK = ['日','一','二','三','四','五','六'];
 var TYPE_NAME = { expense:'支出', income:'收入' };
 /* 发布时同步此版本与 sw.js 缓存版本；界面和备份从此读取。 */
-var APP_VERSION = '1.5.3';
+var APP_VERSION = '1.5.4';
 var MAX_CENTS = 99999999999;
 
 function $(id){ return document.getElementById(id); }
@@ -783,11 +802,11 @@ function daysInMonth(ym){
   var p = ym.split('-'); return new Date(+p[0], +p[1], 0).getDate();
 }
 function validDate(date){
-  if(!/^\d{4}-\d{2}-\d{2}$/.test(date) || +date.slice(0,4) < 1900) return false;
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(date) || +date.slice(0,4) < (platform ? 1 : 1900)) return false;
   var d = new Date(date + 'T12:00:00');
   return isFinite(d.getTime()) && ymd(d) === date;
 }
-function validMonth(month){ return /^\d{4}-(0[1-9]|1[0-2])$/.test(month) && +month.slice(0,4) >= 1900; }
+function validMonth(month){ return /^\d{4}-(0[1-9]|1[0-2])$/.test(month) && +month.slice(0,4) >= (platform ? 1 : 1900); }
 function catEmoji(type, name){
   var arr = CATS[type] || [];
   for(var i=0;i<arr.length;i++){ if(arr[i][0] === name) return arr[i][1]; }
@@ -879,6 +898,7 @@ function applyTheme(){
   var theme = ['light','dark'].indexOf(cfg.theme) >= 0 ? cfg.theme : 'system';
   document.documentElement.dataset.theme = theme;
   $('themeSelect').value = theme;
+  if(platform) platform.theme(theme);
 }
 function showModal(id){
   var el = $(id); el.inert = false; el.classList.add('show');
@@ -1105,10 +1125,12 @@ function stamp(ts){
   return ymd(d) + ' ' + pad2(d.getHours()) + ':' + pad2(d.getMinutes());
 }
 function loadBackups(){
+  if(platform) return platform.snapshots();
   var a = loadJSON(BK_KEY, []);
   return Array.isArray(a) ? a.filter(function(b){ return b && Array.isArray(b.rows); }) : [];
 }
 function saveBackups(list){
+  if(platform){ try{ return platform.retainSnapshots(list); }catch(e){ return false; } }
   for(var attempt = 0; attempt < 5; attempt++){
     try{ store.setItem(BK_KEY, JSON.stringify(list)); return true; }
     catch(e){
@@ -1121,6 +1143,7 @@ function saveBackups(list){
 function snapshot(reason){
   if(!cfg.snapOn && reason === 'daily') return null;
   if(!records.length) return null;
+  if(platform){ try{ return platform.snapshot(reason); }catch(e){ return null; } }
   var today = todayStr(), list = loadBackups();
   list = list.filter(function(b){ return !(b.date === today && b.reason === reason); });
   list.unshift({ ts: Date.now(), date: today, reason: reason, n: records.length,
@@ -1131,7 +1154,7 @@ function snapshot(reason){
 function buildBackup(){
   var ds = records.map(function(r){ return r.date; }).sort();
   return {
-    app: '轻记账', version: 1, appVersion: APP_VERSION, exportedAt: new Date().toISOString(),
+    app: '轻记账', version: 1, appVersion: platform ? 'android-' + platform.version : APP_VERSION, exportedAt: new Date().toISOString(),
     count: records.length,
     range: ds.length ? [ds[0], ds[ds.length-1]] : null,
     records: records.slice().sort(cmpAsc).map(function(r){
@@ -1161,6 +1184,10 @@ function backupFileName(ext){
 }
 
 function downloadText(name, text, mime){
+  if(platform){
+    platform.saveFile(name, text, mime || 'application/json').then(function(){ toast('文件已保存'); }, nativeFileError);
+    return true;
+  }
   try{
     var blob = new Blob([text], { type: (mime || 'application/json') + ';charset=utf-8' });
     var url = URL.createObjectURL(blob);
@@ -1209,6 +1236,15 @@ function parseBackupText(text){
   return { ok:true, records: norm.records, bad: norm.bad, meta: meta };
 }
 function applyImport(rows, mode, config){
+  if(platform){
+    try{
+      var result = platform.importRows(rows, mode, config, recordsBaseline);
+      records = loadJSON(KEY_REC, []); recordsBaseline = store.getItem(KEY_REC); cfg = loadJSON(KEY_CFG, cfg);
+      recoveryNeeded = false; $('recoveryWarning').hidden = true; resetFilters();
+      if(records.length && !records.some(function(r){ return r.date.slice(0,7) === state.month; })) state.month = records.slice().sort(cmpAsc).pop().date.slice(0,7);
+      refresh(); return result;
+    }catch(error){ toast('恢复未完成：' + error.message); return { ok:false }; }
+  }
   if(records.length && !snapshot('import')){ toast('无法创建恢复前快照，请先导出备份并释放存储空间'); return { ok:false }; }
   var before = records.length, added = 0;
   var next = records.slice(), budgetSaved = true;
@@ -1248,12 +1284,12 @@ function snapListHTML(){
   list.forEach(function(b, i){
     var tag = b.reason === 'import' ? ' · 导入前' : (b.reason === 'preclear' ? ' · 清空前' : (b.reason === 'manual' ? ' · 手动' : ''));
     h += '<div class="snap"><span class="ico">🗂</span><span class="d"><b>' + stamp(b.ts) + tag + '</b>' +
-         '<small>' + b.n + ' 条记录</small></span><span class="amt">¥' + yuan(b.total || 0) + '</span>' +
+         '<small>' + (b.corrupt ? '快照无法读取，原文件已保留' : b.n + ' 条记录') + '</small></span><span class="amt">¥' + yuan(b.total || 0) + '</span>' +
          '<button class="del" data-del="' + i + '">删除</button>' +
          '<button class="del" data-i="' + i + '" style="color:var(--brand)">恢复</button></div>';
   });
   return '<div class="card" style="padding:0;overflow:hidden">' + h + '</div>' +
-         '<div class="note-hint">快照保存在本机浏览器内，清除浏览器数据可能一并删除。请使用「立即备份」把文件保存到固定文件夹，也可以另外下载一份。</div>';
+         '<div class="note-hint">' + (platform ? '快照保存在应用私有目录，卸载或清除应用数据会删除。' : '快照保存在本机浏览器内，清除浏览器数据可能一并删除。') + '请使用「立即备份」把文件保存到固定文件夹，也可以另外保存一份。</div>';
 }
 function openSnapList(){
   pending = null;
@@ -1296,6 +1332,7 @@ function closePanel(){ hideModal('panel'); pending = null; $('restoreFileRow').f
 var backupDirectory = null, backupLocationReady = false, backupLocationError = '', backupPermissionState = 'prompt', backupAccessBlocked = false, backupBusy = false, backupPicking = false;
 
 function folderBackupSupported(){
+  if(platform) return true;
   return !!(window.isSecureContext && typeof window.showDirectoryPicker === 'function' && window.indexedDB);
 }
 /* 目录句柄通过 IndexedDB 持久化，绝对路径和句柄不进入可导出的账本。 */
@@ -1322,6 +1359,11 @@ function backupDirectoryStore(operation, handle){
 }
 async function restoreBackupDirectory(){
   try{
+    if(platform){
+      var folder = platform.folder(); backupDirectory = folder.selected ? { name:folder.name } : null;
+      backupPermissionState = folder.granted ? 'granted' : 'denied'; backupLocationError = folder.error || '';
+      backupLocationReady = true; renderBackupLocation(); setTimeout(maybeAutoExport, 1500); return;
+    }
     if(folderBackupSupported() && cfg.backupTarget === 'folder'){
       var handle = await backupDirectoryStore('get');
       if(handle && handle.kind === 'directory'){
@@ -1339,7 +1381,7 @@ function renderBackupLocation(){
   $('backupFolderAction').textContent = !supported ? '普通下载' : backupDirectory && folderMode ? '更换 ›' : '选择文件夹 ›';
   $('backupFolderInfo').textContent = !backupLocationReady ? '正在读取备份位置…' : backupLocationError ? (backupDirectory ? backupDirectory.name + ' · ' : '') + backupLocationError : (!supported ?
     '当前浏览器不支持固定文件夹，请使用新版 Chrome；仍可下载备份' : folderMode ? (backupDirectory ?
-    backupDirectory.name + (backupPermissionState === 'denied' ? ' · 访问被拒绝，请检查浏览器权限' :
+    backupDirectory.name + (backupPermissionState === 'denied' ? (platform ? ' · 访问已失效，请重新选择文件夹' : ' · 访问被拒绝，请检查浏览器权限') :
       backupPermissionState === 'prompt' ? ' · 位置已记住，备份时确认访问' : ' · 后续备份均保存到此文件夹') :
     '尚未选择，点击设置手机上的固定文件夹') : '普通下载 · 可点击改为固定文件夹');
   $('resetBackupFolderRow').hidden = !folderMode || !backupDirectory;
@@ -1354,7 +1396,7 @@ function renderBackupLocation(){
   $('backupLocationWarning').hidden = !(attention && records.length && (cfg.autoExport !== 'off' || backupDirectory));
   $('backupLocationWarningText').textContent = backupLocationError || (!supported ? '当前浏览器不支持固定文件夹，请升级 Chrome 或临时下载备份。' :
     !backupDirectory ? '尚未选择固定备份文件夹，请设置后启用文件备份。' : backupPermissionState === 'denied' ?
-    '备份文件夹访问被拒绝，请在「我的」检查备份位置和浏览器权限。' : '备份尚未完成，需要确认文件夹访问；请在「我的」点击「立即备份」。');
+    (platform ? '备份文件夹访问已失效，请在「我的」重新选择备份位置。' : '备份文件夹访问被拒绝，请在「我的」检查备份位置和浏览器权限。') : '备份尚未完成，需要确认文件夹访问；请在「我的」点击「立即备份」。');
 }
 function folderBackupDue(){
   var interval = EXPORT_MS[cfg.autoExport] || 0;
@@ -1362,6 +1404,16 @@ function folderBackupDue(){
 }
 async function chooseBackupDirectory(){
   if(state.locked || backupBusy || backupPicking) return false;
+  if(platform){
+    backupPicking = true; renderBackupLocation();
+    try{
+      var chosen = await platform.chooseFolder();
+      backupDirectory = { name:chosen.name }; cfg = loadJSON(KEY_CFG, cfg);
+      backupPermissionState = chosen.granted ? 'granted' : 'denied'; backupAccessBlocked = false; backupLocationError = '';
+      toast('备份位置已固定为「' + chosen.name + '」'); return true;
+    }catch(error){ nativeFileError(error); return false; }
+    finally{ backupPicking = false; renderBackupLocation(); }
+  }
   if(!folderBackupSupported()){ toast('当前浏览器不支持固定文件夹，请使用新版 Chrome；可先下载备份'); return false; }
   backupPicking = true; renderBackupLocation();
   try{
@@ -1384,6 +1436,15 @@ async function chooseBackupDirectory(){
 }
 async function resetBackupDirectory(){
   if(backupBusy || !confirm('停用固定备份位置并恢复普通下载？文件夹中的已有备份会保留。')) return;
+  if(platform){
+    backupBusy = true; renderBackupLocation();
+    try{
+      await platform.forgetFolder(); cfg = loadJSON(KEY_CFG, cfg); backupDirectory = null;
+      backupPermissionState = 'prompt'; backupAccessBlocked = false; backupLocationError = '';
+      toast('固定位置已停用，已有备份保留；仍可另外保存文件');
+    }catch(error){ nativeFileError(error); }
+    finally{ backupBusy = false; renderBackupLocation(); } return;
+  }
   var previous = cfg.backupTarget; cfg.backupTarget = 'download';
   if(!persistCfg()){ cfg.backupTarget = previous; return; }
   backupDirectory = null; backupPermissionState = 'prompt'; backupAccessBlocked = false; backupLocationError = '';
@@ -1394,6 +1455,21 @@ async function backupToDirectory(manual){
   if(state.locked || backupBusy || !records.length || !backupLocationReady) return false;
   if(!backupDirectory){
     if(!manual || !await chooseBackupDirectory()) return false;
+  }
+  if(platform){
+    if(!platform.folder().granted){
+      if(!manual || !await chooseBackupDirectory()) return false;
+    }
+    backupBusy = true; renderBackupLocation();
+    try{
+      if(manual) snapshot('manual');
+      await platform.backup(); cfg = loadJSON(KEY_CFG, cfg);
+      backupPermissionState = 'granted'; backupAccessBlocked = false; backupLocationError = '';
+      if(!state.locked) toast('已备份 ' + records.length + ' 条到「' + backupDirectory.name + '」'); return true;
+    }catch(error){
+      backupLocationError = error.message; backupAccessBlocked = true;
+      if(!state.locked) toast('备份失败：' + error.message); return false;
+    }finally{ backupBusy = false; renderBackupLocation(); }
   }
   backupBusy = true; renderBackupLocation();
   var writable, createdFileName = null;
@@ -1437,6 +1513,12 @@ async function backupToDirectory(manual){
 function downloadBackupCopy(updateTime){
   if(!records.length){ toast('还没有记录可备份'); return; }
   snapshot('manual');
+  if(platform){
+    return platform.saveFile(backupFileName('json'), backupJSON(), 'application/json').then(function(){
+      if(updateTime){ cfg.lastExport = Date.now(); persistCfg(); }
+      renderMe(); toast('备份文件已保存');
+    }, nativeFileError);
+  }
   if(downloadText(backupFileName('json'), backupJSON(), 'application/json')){
     if(updateTime){ cfg.lastExport = Date.now(); persistCfg(); }
     renderMe();
@@ -1449,12 +1531,14 @@ function doBackupNow(){
   downloadBackupCopy(true);
 }
 function maybeAutoExport(){
+  if(platform && platform.pickerBusy()) return;
   var iv = EXPORT_MS[cfg.autoExport] || 0;
   if(!iv || !records.length || state.locked) return;
   if(cfg.backupTarget === 'folder'){
     if(!backupLocationReady || !backupDirectory || Date.now() - (cfg.lastFolderBackup || 0) < iv) return;
     return backupToDirectory(false);
   }
+  if(platform) return; // Never open a document picker automatically without a user gesture.
   if(Date.now() - (cfg.lastExport || 0) < iv) return;
   if(downloadText(backupFileName('json'), backupJSON(), 'application/json')){
     cfg.lastExport = Date.now(); persistCfg(); renderMe();
@@ -1471,6 +1555,7 @@ function readFileText(file, cb){
   fr.onerror = function(){ toast('读取文件失败'); };
   fr.readAsText(file);
 }
+function nativeFileError(error){ if(error.message !== '已取消') toast('操作未完成：' + error.message); }
 
 /* ===================== 我的 ===================== */
 function setSwitch(el, on){ el.classList.toggle('on', !!on); el.setAttribute('aria-checked', on ? 'true' : 'false'); }
@@ -1598,11 +1683,13 @@ function pinLen(){ return (cfg.pin && cfg.pin.len) || 4; }
 
 function lockNow(){
   if(!cfg.pin) return;
+  if(platform) platform.lock();
   state.locked = true;
   pinBuf = ''; pinMode = 'unlock'; pinFirst = '';
   $('lock').hidden = false;
   $('lockTitle').textContent = '输入密码';
   $('lockHint').textContent = '请输入 ' + pinLen() + ' 位数字';
+  if(platform && cfg.pin.unknownLength) $('lockHint').textContent = '请输入原来的 4–6 位 PIN，再点确认';
   $('forgotBtn').hidden = false;
   $('cancelPin').hidden = true;
   $('app').inert = true; $('fab').inert = true; $('sheet').inert = true; $('panel').inert = true;
@@ -1619,10 +1706,14 @@ function unlockUI(){
   if(showUpdateBar.pending){ showUpdateBar.pending = false; showUpdateBar(); }
   pinBuf = '';
   renderDots();
+  if(platform && cfg.snapOn !== false && records.length && cfg.lastSnap !== todayStr()){
+    if(snapshot('daily')){ cfg.lastSnap = todayStr(); persistCfg(); renderMe(); }
+  }
   setTimeout(maybeAutoExport, 800);   // 被锁屏挡住的自动导出，解锁后再做
 }
 function renderDots(){
   var n = pinMode === 'unlock' ? pinLen() : Math.max(4, pinBuf.length);
+  if(platform && cfg.pin && cfg.pin.unknownLength && pinMode === 'unlock') n = Math.max(4, pinBuf.length);
   var d = $('lockDots'), html = '';
   for(var i=0;i<n;i++) html += '<i class="dot' + (i < pinBuf.length ? ' f' : '') + '"></i>';
   d.innerHTML = html;
@@ -1635,7 +1726,7 @@ function pinKey(k){
 
   if(pinMode === 'unlock'){
     renderDots();
-    if(pinBuf.length === pinLen()) setTimeout(submitPin, 90);
+    if(pinBuf.length === pinLen() && !(platform && cfg.pin.unknownLength)) setTimeout(submitPin, 90);
     return;
   }
   if(pinMode === 'set'){ renderDots(); if(pinBuf.length === 6) return; return; }
@@ -1656,6 +1747,12 @@ function pinError(msg){
 function submitPin(){
   if($('lock').hidden || (pinMode === 'unlock' && !cfg.pin)) return;
   if(pinMode === 'unlock'){
+    if(platform){
+      try{
+        if(platform.verifyPin(pinBuf)){ cfg = loadJSON(KEY_CFG, cfg); $('lockHint').textContent = ''; unlockUI(); }
+        else pinError('密码不正确，请重试');
+      }catch(error){ pinError(error.message); } return;
+    }
     if(pinHash(pinBuf, cfg.pin.salt) === cfg.pin.hash && pinBuf.length === pinLen()){
       $('lockHint').textContent = '';
       unlockUI();
@@ -1673,6 +1770,10 @@ function submitPin(){
   if(pinMode === 'confirm'){
     if(pinBuf !== pinFirst){ pinFirst=''; pinMode='set'; pinBuf=''; $('lockTitle').textContent='设置密码';
       pinError('两次输入不一致，请重新设置'); return; }
+    if(platform){
+      try{ cfg.pin = platform.setPin(pinBuf); $('lockHint').textContent = ''; unlockUI(); renderMe(); toast('密码已设置'); }
+      catch(error){ pinError(error.message); } return;
+    }
     var salt = Math.random().toString(36).slice(2,10) + Date.now().toString(36);
     var previousPin = cfg.pin;
     cfg.pin = { salt: salt, hash: pinHash(pinBuf, salt), len: pinBuf.length };
@@ -1698,7 +1799,7 @@ function buildPad(){
   var keys = ['1','2','3','4','5','6','7','8','9','blank','0','del'];
   var html = '';
   keys.forEach(function(k){
-    if(k === 'blank'){ html += pinMode === 'unlock' ? '<button class="blank" tabindex="-1" aria-hidden="true"></button>' : '<button class="act" data-k="ok" aria-label="确认 PIN">确认</button>'; return; }
+    if(k === 'blank'){ html += pinMode === 'unlock' && !platform ? '<button class="blank" tabindex="-1" aria-hidden="true"></button>' : '<button class="act" data-k="ok" aria-label="确认 PIN">确认</button>'; return; }
     if(k === 'del'){ html += '<button class="act" data-k="del" aria-label="删除">⌫</button>'; return; }
     html += '<button data-k="' + k + '">' + k + '</button>';
   });
@@ -1816,6 +1917,7 @@ $('statSeg').addEventListener('click', function(e){
 $('pinSwitch').onclick = function(){
   if(cfg.pin){
     if(confirm('关闭密码锁？下次打开将不再需要密码。')){
+      if(platform){ try{ platform.disablePin(); cfg.pin = null; renderMe(); toast('已关闭密码锁'); }catch(error){ toast(error.message); } return; }
       var previous = cfg.pin; cfg.pin = null;
       if(!persistCfg()){ cfg.pin = previous; return; }
       renderMe(); toast('已关闭密码锁');
@@ -1863,6 +1965,7 @@ $('downloadBackupRow').onclick = function(){ downloadBackupCopy(false); };
 $('openBackupSettings').onclick = function(){ switchView('me'); $('backupFolderRow').focus(); };
 $('csvRow').onclick = function(){
   if(!records.length){ toast('还没有记录可导出'); return; }
+  if(platform){ platform.saveFile(backupFileName('csv'), toCSV(), 'text/csv').then(function(){ toast('CSV 文件已保存'); }, nativeFileError); return; }
   if(downloadText(backupFileName('csv'), toCSV(), 'text/csv')) toast('CSV 已导出（' + records.length + ' 条）');
 };
 $('snapListRow').onclick = openSnapList;
@@ -1872,7 +1975,14 @@ $('updateNow').onclick = function(){
 };
 $('updateLater').onclick = function(){ $('updateBar').hidden = true; };
 $('panelClose').onclick = closePanel;
-$('restoreFileRow').onclick = function(){ $('fileInput').click(); };
+$('restoreFileRow').onclick = function(){
+  if(platform){ platform.importFile().then(function(text){
+    var parsed = parseBackupText(text);
+    if(!parsed.ok){ alert('无法恢复：' + parsed.error); return; }
+    openRestorePreview(parsed.records, parsed.meta, false, -1);
+  }, nativeFileError); return; }
+  $('fileInput').click();
+};
 $('fileInput').onchange = function(){
   var f = this.files && this.files[0];
   if(!f) return;
@@ -1921,6 +2031,7 @@ $('panelReplace').onclick = function(){
   toast('已恢复 ' + res.after + ' 条记录（原 ' + res.before + ' 条已存入快照）' + (res.budgetSaved ? '' : '；预算未能保存，请检查存储空间'));
 };
 $('forgotBtn').onclick = function(){
+  if(platform){ platform.forgotPin().then(function(){ location.reload(); }, nativeFileError); return; }
   if(!confirm('忘记密码只能清空本机数据后重新开始（数据未加密保存，密码无法找回）。\n\n确定清空？')) return;
   var locked = state.locked; state.locked = false;
   if(!commitRecords([], true)){ state.locked = locked; return; }
@@ -1995,6 +2106,7 @@ initSW();
    更新策略：导航请求在 sw.js 里是「网络优先」，所以联网打开一次就能拿到新版 index.html；
    这里额外做的是——发现新版本时在底部提示一条「立即更新」。 */
 function initSW(){
+  if(platform) return; // Bundled assets are already offline; no network or Service Worker is used.
   if(!('serviceWorker' in navigator) || !window.isSecureContext) return;
   hadController = !!navigator.serviceWorker.controller;
   navigator.serviceWorker.register('sw.js').then(function(reg){
@@ -2025,6 +2137,23 @@ window.__jz = { toCents:toCents, yuan:yuan, shiftMonth:shiftMonth, monthLabel:mo
                 normalizeRows:normalizeRows, snapshot:snapshot, loadBackups:loadBackups,
                 showUpdateBar:showUpdateBar, CATS:CATS,
                 evalAmount:evalAmount, amountCents:amountCents, hasOperator:hasOperator };
+
+if(platform){
+  $('appVer').textContent = platform.version + ' Android';
+  $('date').min = '0001-01-01';
+  var versionLine = document.querySelector('.verline');
+  if(versionLine) versionLine.innerHTML = '轻记账 Android <span id="appVer">' + esc(platform.version) + '</span> · 本机离线 · Web ' + APP_VERSION;
+  platform.connect({
+    resume:function(shouldLock){ if(shouldLock) lockNow(); else setTimeout(maybeAutoExport, 800); },
+    back:function(){
+      if(!$('lock').hidden) return false;
+      if($('sheet').classList.contains('show')){ closeEntry(); return true; }
+      if($('panel').classList.contains('show')){ closePanel(); return true; }
+      if(document.body.dataset.view !== 'list'){ switchView('list'); return true; }
+      return false;
+    }
+  });
+}
 
 if(location.hash.indexOf('selftest') >= 0){
   var pass = 0, fail = [];

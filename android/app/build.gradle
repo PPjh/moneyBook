@@ -1,0 +1,44 @@
+plugins { id 'com.android.application' }
+
+android {
+    namespace 'io.github.ppjh.moneybook'
+    compileSdk 35
+    defaultConfig {
+        applicationId 'io.github.ppjh.moneybook'
+        minSdk 26
+        targetSdk 35
+        versionCode 3
+        versionName '1.1.1'
+        buildConfigField 'String', 'WEB_BACKUP_VERSION', '"1.5.4"'
+    }
+    buildFeatures { buildConfig true }
+    sourceSets.main.assets.srcDir layout.buildDirectory.dir('generated/sharedUiAssets')
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    buildTypes {
+        release {
+            minifyEnabled false
+            // Never silently use a debug signature for a production release.
+            // Configure an externally stored keystore before publishing release APKs.
+        }
+    }
+    testOptions { unitTests.returnDefaultValues = false }
+    lint { abortOnError true; checkReleaseBuilds true }
+}
+
+// Use the actual Web UI, not a separately maintained copy. No Node installation is needed by Gradle.
+def sharedUiAssets = tasks.register('prepareSharedUi', Sync) {
+    from('../../web') {
+        include 'index.html', 'manifest.json', 'icon-192.png', 'icon-512.png', 'icon-maskable-512.png'
+    }
+    from('src/main/web') { include 'native-adapter.js' }
+    into layout.buildDirectory.dir('generated/sharedUiAssets')
+}
+tasks.named('preBuild').configure { dependsOn sharedUiAssets }
+
+dependencies {
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.json:json:20240303'
+}

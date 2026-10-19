@@ -1,7 +1,7 @@
 import { createRequire } from 'node:module';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { readFileSync } from 'node:fs';
+import { readFileSync, mkdirSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -11,8 +11,11 @@ const browser = await chromium.launch({ headless:true, channel:process.env.MONEY
 const errors = [], results = [];
 const baseURL = process.env.MONEYBOOK_TEST_URL || 'http://localhost:8080/';
 const dir = dirname(fileURLToPath(import.meta.url));
+const repoDir = dirname(dir);
 const appVersion = readFileSync(join(dir,'index.html'),'utf8').match(/var APP_VERSION = '([^']+)'/)[1];
-const screenshot = name => join(dir,'screenshots',appVersion+'-'+name+'.png');
+const screenshotDir = process.env.MONEYBOOK_SCREENSHOT_DIR || join(dir,'screenshots');
+mkdirSync(screenshotDir, { recursive:true });
+const screenshot = name => join(screenshotDir,appVersion+'-'+name+'.png');
 const now = new Date();
 const month = now.getFullYear() + '-' + String(now.getMonth()+1).padStart(2,'0');
 const prev = new Date(now.getFullYear(), now.getMonth()-1, 1);
@@ -263,8 +266,8 @@ try{
 
   // 在独立来源中先安装 Git 中的 1.4.3，再切换当前文件，验证真实旧缓存升级。
   const baseline = '0ee95bd';
-  const oldIndex = execFileSync('git',['show',baseline+':index.html'],{cwd:dir});
-  const oldSW = execFileSync('git',['show',baseline+':sw.js'],{cwd:dir});
+  const oldIndex = execFileSync('git',['show',baseline+':index.html'],{cwd:repoDir});
+  const oldSW = execFileSync('git',['show',baseline+':sw.js'],{cwd:repoDir});
   let old = true;
   const assets = new Set(['index.html','sw.js','manifest.json','icon-192.png','icon-512.png','icon-maskable-512.png']);
   const server = createServer((req,res)=>{

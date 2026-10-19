@@ -1,0 +1,66 @@
+name: Android checks and APK
+
+on:
+  push:
+    paths:
+      - 'android/**'
+      - 'web/index.html'
+      - 'web/icon-*.png'
+      - 'web/manifest.json'
+      - '.github/workflows/android.yml'
+  pull_request:
+    paths:
+      - 'android/**'
+      - 'web/index.html'
+      - 'web/icon-*.png'
+      - 'web/manifest.json'
+      - '.github/workflows/android.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+          cache-dependency-path: |
+            android/**/*.gradle
+            android/gradle/wrapper/gradle-wrapper.properties
+      - name: Verify official Gradle Wrapper checksum
+        run: test "$(sha256sum gradle/wrapper/gradle-wrapper.jar | cut -d ' ' -f1)" = '2db75c40782f5e8ba1fc278a5574bab070adccb2d21ca5a6e5ed840888448046'
+      - name: Test, lint and assemble native APK
+        run: bash gradlew --no-daemon --stacktrace testDebugUnitTest lintDebug assembleDebug
+      - name: Upload installable test APK
+        uses: actions/upload-artifact@v7
+        with:
+          name: moneybook-android-debug
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload test and lint reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: android-test-reports
+          path: |
+            android/app/build/reports/tests/
+            android/app/build/reports/lint-results-debug.html
+          if-no-files-found: ignore
+          retention-days: 14

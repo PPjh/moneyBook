@@ -1,6 +1,6 @@
 /* 轻记账 · 打包（零依赖）
-   用法： node build.mjs
-   产出： dist/ —— 6 个应用文件 + .nojekyll，可用于静态托管 */
+   用法： 仓库根目录运行 node web/build.mjs，或在 web/ 内运行 node build.mjs
+   产出： web/dist/ —— 6 个应用文件 + .nojekyll，可用于静态托管 */
 import { mkdirSync, copyFileSync, writeFileSync, rmSync, existsSync, statSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -46,6 +46,6 @@ writeFileSync(join(DIST, '.nojekyll'), '');
 
 console.log(`\n✓ ${appVersion[1]} · dist/ 已生成，共 ${FILES.length + 1} 个文件、${total.toFixed(1)} KB\n`);
 console.log('接下来：');
-console.log('  · GitHub Pages   → 新建仓库 → 把 dist 里的文件拖进上传页 → Settings / Pages / 选 main 分支');
+console.log('  · GitHub Pages   → Settings / Pages / Source 选择 GitHub Actions → 运行 Web 发布工作流');
 console.log('  · Cloudflare Pages 或 Netlify Drop → 直接把 dist 文件夹拖进去');
 console.log('  · 拿到 https:// 地址后用手机打开 → 浏览器菜单「安装应用」\n');

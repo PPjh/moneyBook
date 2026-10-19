@@ -1,5 +1,5 @@
 /* 轻记账 · 自检脚本（零依赖）
-   用法： node check.mjs
+   用法： 仓库根目录运行 node web/check.mjs，或在 web/ 内运行 node check.mjs
    做法：把 index.html 里的真实脚本放进一个极小的 DOM 桩里执行，
         既验证纯函数，也把「记账 → 编辑 → 删除 → 统计 → 解锁」整条链路走一遍。
         任何一处抛错或结果不符都会失败并返回非 0 退出码。 */
@@ -655,10 +655,10 @@ if (app) {
 
   const deployFiles = ['index.html', 'manifest.json', 'sw.js', 'icon-192.png', 'icon-512.png', 'icon-maskable-512.png'];
 
-  // 部署契约：GitHub Pages 直接从仓库根目录发布，所以这 6 个文件必须在根目录
-  for (const f of deployFiles) ok(existsSync(join(DIR, f)), '仓库根目录可直接发布：' + f);
-  ok(existsSync(join(DIR, '.nojekyll')), '根目录有 .nojekyll（跳过 GitHub Pages 的 Jekyll）');
-  ok(existsSync(join(DIR, '.gitignore')), '根目录有 .gitignore');
+  // Web 源码位于 web/；部署 web/dist/ 的内容，公开 URL 不增加 /web/。
+  for (const f of deployFiles) ok(existsSync(join(DIR, f)), 'Web 项目包含部署文件：' + f);
+  ok(existsSync(join(DIR, '.nojekyll')), 'Web 项目有 .nojekyll（跳过 GitHub Pages 的 Jekyll）');
+  ok(existsSync(join(DIR, '..', '.gitignore')), '统一仓库根目录有 .gitignore');
 
   if (existsSync(join(DIR, 'dist'))) {
     for (const f of deployFiles) {
@@ -668,8 +668,7 @@ if (app) {
     }
     ok(existsSync(join(DIR, 'dist', '.nojekyll')), 'dist 带 .nojekyll（跳过 GitHub Pages 的 Jekyll）');
   } else {
-    // dist/ 只服务于 Cloudflare Pages / Netlify Drop 那种「拖文件夹」部署，
-    // 从仓库根目录发布时不需要它，因此缺失不算失败（新克隆下来就应该是这样）。
+    // dist/ 是未入库的构建产物，新克隆时可以不存在；需要时先构建再自检。
     ok(true, 'dist/ 未生成，跳过打包一致性校验（需要时运行 node build.mjs）');
   }
 

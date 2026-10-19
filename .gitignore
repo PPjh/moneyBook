@@ -1,11 +1,34 @@
 # ---- 构建产物 ----
-# GitHub Pages 直接从仓库根目录发布（index.html 等本来就在根目录），
-# 所以 dist/ 不必提交；它只在你用 Cloudflare Pages / Netlify Drop
-# 拖文件夹部署时才需要，本地跑 node build.mjs 生成即可。
+# 仓库统一管理 web/ 和 android/。Web 运行 node web/build.mjs，
+# 生成 web/dist/；GitHub Pages 工作流只发布该构建目录。
 dist/
 node_modules/
 playwright-report/
 test-results/
+
+# ---- 安卓本机配置、缓存和安装包 ----
+.gradle/
+.kotlin/
+build/
+local.properties
+captures/
+*.apk
+*.aab
+*.apks
+
+# ---- 签名凭据与个人账目 ----
+.signing/
+*.jks
+*.keystore
+*.p12
+keystore.properties
+signing.properties
+.env
+.env.*
+!.env.example
+backups/
+轻记账-备份-*.json
+轻记账-原始账本-*.json
 
 # ---- 临时文件 ----
 _*.mjs
