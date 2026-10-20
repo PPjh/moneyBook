@@ -65,7 +65,7 @@ public final class SharedUiState {
         } catch (ArithmeticException ignored) {
         }
       }
-    // PIN material, directory URIs and arbitrary fields never cross into UI configuration storage.
+    // PIN material, native biometric flags, directory URIs and arbitrary fields cannot be set by JS.
     return new JSONObject()
         .put("theme", theme)
         .put("autoExport", cycle)

@@ -48,32 +48,41 @@ async function context(native, pin = null, options = {}) {
         localStorage.setItem('jz.records.v1',JSON.stringify(rows)); localStorage.setItem('jz.config.v1',JSON.stringify(config));
       } return;
     }
-    const state = JSON.parse(sessionStorage.getItem('native-harness') || 'null') || {records:rows,config,pin,snapshots:[],folder:{selected:true,name:'轻记账备份',granted:true,error:''},files:[]};
+    const state = JSON.parse(sessionStorage.getItem('native-harness') || 'null') || {records:rows,config,pin,biometric:{enabled:!!pin,migrating:!!pin,available:true,deviceCredential:true,description:'使用系统指纹验证；可用手机锁屏密码备用'},locked:!!pin,snapshots:[],folder:{selected:true,name:'轻记账备份',granted:true,error:''},files:[]};
+    state.locked = state.biometric.enabled; // Every page start needs a new native session.
     window.__nativeHarness = state;
     const save = () => sessionStorage.setItem('native-harness',JSON.stringify(state));
-    const publicPin = () => state.pin ? {salt:'native',hash:'native',len:state.pin.known?state.pin.value.length:4,native:true,unknownLength:!state.pin.known} : null;
+    const requireUnlocked=()=>{if(state.locked)throw Error('请先使用指纹解锁账本');};
+    // Harness only: this represents a native OS callback, not a production page API.
+    window.__completeNativeBiometric=success=>{
+      if(!success)return false;
+      state.biometric.enabled=true;state.biometric.migrating=false;state.pin=null;state.locked=false;save();
+      window.MoneyBookPlatform.resume(false);return true;
+    };
     function call(op,a) {
       if(op==='info') return {version};
       if(op==='get') {
         if(a.key==='jz.records.v1') return JSON.stringify(state.records);
-        if(a.key==='jz.config.v1') return JSON.stringify({...state.config,pin:publicPin()}); return null;
+        if(a.key==='jz.config.v1') return JSON.stringify({...state.config,pin:null,biometric:state.biometric}); return null;
       }
       if(op==='set') {
+        requireUnlocked();
         if(a.key==='jz.records.v1') { if(a.expected!==JSON.stringify(state.records)) throw Error('账本已更新'); state.records=JSON.parse(a.value); }
-        else { state.config=JSON.parse(a.value); delete state.config.pin; } save(); return true;
+        else { state.config=JSON.parse(a.value); delete state.config.pin; delete state.config.biometric; } save(); return true;
       }
-      if(op==='theme'||op==='ready'||op==='lock') return true;
+      if(op==='theme'||op==='ready') return true;
+      if(op==='lock'){state.locked=state.biometric.enabled;save();return true;}
+      if(op==='biometricInfo')return state.biometric;
       if(op==='folder') return state.folder;
       if(op==='snapshots') return state.snapshots;
       if(op==='snapshot') {
+        requireUnlocked();
         const snapshot={nativeId:'snapshot-'+Date.now(),ts:Date.now(),date:new Date().toISOString().slice(0,10),reason:a.reason,n:state.records.length,total:5600,rows:JSON.parse(JSON.stringify(state.records)),config:{budgets:state.config.budgets}};
         state.snapshots.unshift(snapshot);state.snapshots=state.snapshots.slice(0,10);save();return snapshot;
       }
-      if(op==='retainSnapshots') {state.snapshots=state.snapshots.filter(s=>a.keep.includes(s.nativeId));save();return true;}
-      if(op==='pinVerify') {const valid=state.pin&&state.pin.value===a.pin;if(valid)state.pin.known=true;save();return !!valid;}
-      if(op==='pinSet') {state.pin={value:a.pin,known:true};save();return publicPin();}
-      if(op==='pinDisable') {state.pin=null;save();return true;}
+      if(op==='retainSnapshots') {requireUnlocked();state.snapshots=state.snapshots.filter(s=>a.keep.includes(s.nativeId));save();return true;}
       if(op==='import') {
+        requireUnlocked();
         if(a.expected!==JSON.stringify(state.records))throw Error('账本已更新');
         const before=state.records.length;
         if(a.mode==='replace'){state.records=a.rows;state.config.budgets=a.config.budgets||{};}
@@ -88,6 +97,13 @@ async function context(native, pin = null, options = {}) {
         try {
           const a=JSON.parse(args);let value=true;
           if(state.cancelNext){state.cancelNext=false;throw Error('已取消');}
+          if(op==='biometricAuth') {
+            if(state.failAuth)throw Error('系统验证失败，原设置保持不变');
+            if(a.action!=='unlock')requireUnlocked();
+            if(a.action==='enable'&&!state.biometric.available)throw Error('请先录入指纹');
+            state.biometric.enabled=a.action!=='disable';state.biometric.migrating=false;state.pin=null;state.locked=false;
+            value=state.biometric;save();window.MoneyBookPlatform.resume(false);
+          } else if(op!=='biometricSettings')requireUnlocked();
           if(op==='backup') {
             if(state.failBackup)throw Error('设备存储空间不足');
             state.files.push({text:JSON.stringify({records:state.records,config:{budgets:state.config.budgets}})});
@@ -277,15 +293,47 @@ try {
   await safeWeb.ctx.close();
   results.push('320–639px: compact cards and single-row filters; zero/unset, overspent, large amounts, bold and two density factors; 640/768/960/1440px desktop preserved');
   results.push('Android CSS avoids duplicate safe areas while PWA retains them');
-  const legacy=await context(true,{value:'123456',known:false});
-  assert.equal(await legacy.page.locator('#lock').isVisible(),true);
-  for(const digit of '123456')await legacy.page.locator('#pad').getByRole('button',{name:digit,exact:true}).click();
-  await legacy.page.locator('[data-k="ok"]').click();await legacy.page.waitForFunction(()=>document.getElementById('lock').hidden);
-  await legacy.page.reload({waitUntil:'networkidle'});assert.equal(await legacy.page.locator('#lock').isVisible(),true);
-  for(const digit of '123456')await legacy.page.locator('#pad').getByRole('button',{name:digit,exact:true}).click();
-  await legacy.page.waitForFunction(()=>document.getElementById('lock').hidden);
-  await legacy.page.evaluate(()=>window.MoneyBookPlatform.resume(true));assert.equal(await legacy.page.locator('#lock').isVisible(),true);
-  results.push('legacy native 6-digit PIN with initially unknown length unlocks; reload and lifecycle resume lock again');
+  const bio=await context(true), bp=bio.page;
+  await bp.locator('[data-view="me"]').click();
+  assert.equal(await bp.locator('#pinSwitch').getAttribute('aria-label'),'指纹解锁');
+  assert.equal(await bp.locator('#changePinRow').isVisible(),false);
+  await bp.screenshot({path:join(output,version+'-biometric-settings.png')});
+  await bp.evaluate(()=>window.__nativeHarness.cancelNext=true);await bp.locator('#pinSwitch').click();
+  await bp.waitForFunction(()=>!document.getElementById('pinSwitch').disabled);
+  assert.equal(await bp.locator('#pinSwitch').getAttribute('aria-checked'),'false','cancel does not enable protection');
+  await bp.evaluate(()=>window.__nativeHarness.biometric.available=false);await bp.locator('#pinSwitch').click();
+  await bp.waitForFunction(()=>!document.getElementById('pinSwitch').disabled);
+  assert.equal(await bp.locator('#pinSwitch').getAttribute('aria-checked'),'false','unenrolled device cannot enable fingerprint');
+  await bp.evaluate(()=>window.__nativeHarness.biometric.available=true);await bp.locator('#pinSwitch').click();
+  await bp.waitForFunction(()=>document.getElementById('pinSwitch').getAttribute('aria-checked')==='true');
+  await bp.evaluate(()=>window.__nativeHarness.failAuth=true);await bp.locator('#pinSwitch').click();
+  await bp.waitForFunction(()=>!document.getElementById('pinSwitch').disabled);
+  assert.equal(await bp.locator('#pinSwitch').getAttribute('aria-checked'),'true','failed disable preserves protection');
+  await bp.evaluate(()=>window.__nativeHarness.failAuth=false);await bp.locator('#pinSwitch').click();
+  await bp.waitForFunction(()=>document.getElementById('pinSwitch').getAttribute('aria-checked')==='false');
+  assert.equal(await bp.evaluate(()=>window.__nativeHarness.records.length),3);
+  await bio.ctx.close();
+  const legacy=await context(true,{value:'legacy-app-pin'},{config:{lockDelay:0}}), lp=legacy.page;
+  assert.equal(await lp.locator('#lock').isVisible(),false,'APK never shows the application PIN keyboard');
+  assert.equal(await lp.locator('#pad button').count(),0);
+  assert.equal(await lp.evaluate(()=>document.getElementById('app').inert),true,'ledger remains inert while native gate is locked');
+  assert.equal(await lp.evaluate(()=>window.__completeNativeBiometric(false)),false);
+  assert.equal(await lp.evaluate(()=>window.__nativeHarness.biometric.migrating),true,'failed auth cannot migrate old PIN');
+  assert.equal(await lp.evaluate(()=>JSON.parse(window.MoneyBookNative.call('pinDisable','{}')).ok),false,'obsolete PIN bridge is not available');
+  assert.equal(await lp.evaluate(()=>JSON.parse(window.MoneyBookNative.call('set',JSON.stringify({key:'jz.records.v1',value:'[]',expected:JSON.stringify(window.__nativeHarness.records)}))).ok),false,'locked writes remain denied by native boundary');
+  await lp.evaluate(()=>window.__completeNativeBiometric(true));
+  assert.equal(await lp.evaluate(()=>document.getElementById('app').inert),false);
+  assert.equal(await lp.evaluate(()=>window.__nativeHarness.pin),null);
+  assert.equal(await lp.evaluate(()=>window.__nativeHarness.biometric.migrating),false);
+  assert.equal(await lp.evaluate(()=>window.__nativeHarness.records.length),3);
+  await lp.evaluate(()=>{hiddenAt=Date.now()-1000;document.dispatchEvent(new Event('visibilitychange'));});
+  assert.equal(await lp.evaluate(()=>window.__nativeHarness.locked),false,'browser visibility cannot immediately relock a fresh native authentication');
+  await lp.reload({waitUntil:'networkidle'});
+  assert.equal(await lp.evaluate(()=>document.getElementById('app').inert),true,'reopen requires a fresh native verification');
+  await lp.evaluate(()=>window.__completeNativeBiometric(true));
+  await lp.evaluate(()=>window.MoneyBookPlatform.resume(true));
+  assert.equal(await lp.evaluate(()=>window.__nativeHarness.locked),true,'background relock keeps native operations protected');
+  results.push('native biometric adapter: cancel/unavailable/enable/failed disable/disable, legacy PIN migration without data loss, locked writes, reopen and background relock; OS prompt itself still needs a real device');
   await legacy.ctx.close();assert.deepEqual(errors,[]);
   writeFileSync(join(output,'results.json'),JSON.stringify({version,results,errors},null,2));
   const summary=results.map(result=>result.phoneLayouts?{phoneLayouts:result.phoneLayouts.map(({width,overview,details})=>({width,cardsHeight:overview.height,detailsTop:details.top}))}:result);

@@ -65,11 +65,15 @@ public class SharedUiStateTest {
         SharedUiState.cleanConfig(
             new JSONObject()
                 .put("pin", "secret")
+                .put("biometric", new JSONObject().put("enabled", false))
+                .put("biometricEnabled", false)
                 .put("backupUri", "private-uri")
                 .put("theme", "dark")
                 .put("lockDelay", 300_000)
                 .put("lastCat", new JSONObject().put("expense", "交通")));
     assertFalse(clean.has("pin"));
+    assertFalse(clean.has("biometric"));
+    assertFalse(clean.has("biometricEnabled"));
     assertFalse(clean.has("backupUri"));
     assertEquals("dark", clean.getString("theme"));
     assertEquals(300_000, clean.getLong("lockDelay"));

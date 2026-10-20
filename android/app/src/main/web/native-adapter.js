@@ -49,16 +49,15 @@
     snapshot: function (reason) { return call('snapshot', { reason: reason }); },
     retainSnapshots: function (list) { return call('retainSnapshots', { keep: list.map(function (item) { return item.nativeId; }) }); },
     importRows: function (rows, mode, config, expected) { return call('import', { rows: rows, mode: mode, config: config || {}, expected: expected }); },
-    verifyPin: function (pin) { return call('pinVerify', { pin: pin }); },
-    setPin: function (pin) { return call('pinSet', { pin: pin }); },
-    disablePin: function () { return call('pinDisable'); },
-    forgotPin: function () { return request('forgotPin'); },
+    biometricInfo: function () { return call('biometricInfo'); },
+    setBiometric: function (enabled) { return request('biometricAuth', { action: enabled ? 'enable' : 'disable' }); },
+    biometricSettings: function () { return request('biometricSettings'); },
     lock: function () { return call('lock'); },
     theme: function (theme) { call('theme', { theme: theme }); },
     pickerBusy: function () { return Object.keys(pending).length > 0; },
     connect: function (callbacks) {
       runtime = callbacks;
-      call('ready', { pinShown: !document.getElementById('lock').hidden });
+      call('ready'); // The native host, never a JS claim, owns visibility of the locked ledger.
     },
     resume: function (shouldLock) { if (runtime) runtime.resume(shouldLock); },
     back: function () { return runtime ? runtime.back() : false; }

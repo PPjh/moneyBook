@@ -12,6 +12,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
+import android.view.Gravity;
 import android.view.View;
 import android.view.WindowInsets;
 import android.view.WindowManager;
@@ -24,8 +25,10 @@ import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
-import android.widget.EditText;
+import android.widget.Button;
 import android.widget.FrameLayout;
+import android.widget.ImageView;
+import android.widget.LinearLayout;
 import android.widget.TextView;
 import java.io.ByteArrayInputStream;
 import java.io.File;
@@ -72,16 +75,27 @@ public final class MainActivity extends Activity {
   private boolean ready, destroyed;
   private volatile boolean unlocked;
   private volatile long backgroundAt;
+  private BiometricAuth authentication;
+  private LinearLayout lockGate;
+  private TextView lockMessage;
+  private volatile boolean biometricEnabled, migratingPin;
+  private boolean resumed, autoAuthAttempted;
+  private volatile int pageGeneration;
+  private Runnable verifiedOnResume;
+  private String authenticationMessage = "";
 
   @Override
   public void onCreate(Bundle state) {
     super.onCreate(state);
     preferences = getSharedPreferences("settings", MODE_PRIVATE);
+    biometricEnabled = preferences.getBoolean("biometricEnabled", false);
+    migratingPin = !preferences.getString("pin", "").isEmpty();
+    authentication = new BiometricAuth(this);
     try {
       database = new LedgerDatabase(this);
       database.getWritableDatabase();
       files = new NativeFiles(this, preferences, database);
-      unlocked = !hasPin();
+      unlocked = !hasLock();
       bridge = new Bridge();
       root = new FrameLayout(this);
       setContentView(root);
@@ -116,8 +130,7 @@ public final class MainActivity extends Activity {
           });
       root.requestApplyInsets();
       web = new WebView(this);
-      web.setVisibility(
-          View.INVISIBLE); // Do not expose an uninitialised page before its PIN screen is ready.
+      web.setVisibility(View.INVISIBLE); // Only the native gate may expose a protected ledger.
       web.setBackgroundColor(Color.TRANSPARENT);
       WebSettings settings = web.getSettings();
       settings.setJavaScriptEnabled(true);
@@ -172,6 +185,7 @@ public final class MainActivity extends Activity {
       startupMessage.setText("正在打开本机账本…");
       startupMessage.setPadding(32, 100, 32, 32);
       root.addView(startupMessage, new FrameLayout.LayoutParams(-1, -1));
+      createLockGate();
       // Configuration changes are handled in-place, so drafts, pending pickers and native grants
       // survive.
       web.loadUrl(HOME);
@@ -254,6 +268,10 @@ public final class MainActivity extends Activity {
 
     @Override
     public void onPageStarted(WebView view, String url, android.graphics.Bitmap icon) {
+      ++pageGeneration;
+      authentication.cancel();
+      verifiedOnResume = null;
+      autoAuthAttempted = false;
       ready = false;
       view.setVisibility(View.INVISIBLE);
       if (startupMessage == null) {
@@ -266,7 +284,8 @@ public final class MainActivity extends Activity {
         view.stopLoading();
         return;
       }
-      unlocked = !hasPin();
+      unlocked = !hasLock();
+      if (lockGate != null) lockGate.setVisibility(View.GONE);
     }
 
     @Override
@@ -311,8 +330,151 @@ public final class MainActivity extends Activity {
         && uri.getQuery() == null;
   }
 
-  private boolean hasPin() {
-    return !preferences.getString("pin", "").isEmpty();
+  private boolean hasLock() {
+    return LockPolicy.enabled(biometricEnabled, migratingPin);
+  }
+
+  private int dp(int value) {
+    return Math.round(value * getResources().getDisplayMetrics().density);
+  }
+
+  private void createLockGate() {
+    lockGate = new LinearLayout(this);
+    lockGate.setOrientation(LinearLayout.VERTICAL);
+    lockGate.setGravity(Gravity.CENTER);
+    lockGate.setPadding(dp(28), dp(24), dp(28), dp(24));
+    lockGate.setVisibility(View.GONE);
+    ImageView icon = new ImageView(this);
+    icon.setImageResource(R.mipmap.ic_launcher);
+    icon.setContentDescription("轻记账");
+    lockGate.addView(icon, new LinearLayout.LayoutParams(dp(76), dp(76)));
+    lockMessage = new TextView(this);
+    lockMessage.setTextSize(16);
+    lockMessage.setGravity(Gravity.CENTER);
+    lockMessage.setPadding(0, dp(22), 0, dp(20));
+    lockGate.addView(lockMessage, new LinearLayout.LayoutParams(-1, -2));
+    Button unlock = new Button(this);
+    unlock.setText("指纹解锁");
+    unlock.setOnClickListener(v -> beginAuthentication(null, "unlock", false));
+    lockGate.addView(unlock, new LinearLayout.LayoutParams(-1, dp(52)));
+    Button credential = new Button(this);
+    credential.setText("使用手机锁屏密码");
+    credential.setOnClickListener(v -> beginAuthentication(null, "unlock", true));
+    lockGate.addView(credential, new LinearLayout.LayoutParams(-1, dp(52)));
+    Button settings = new Button(this);
+    settings.setText("系统指纹设置");
+    settings.setOnClickListener(
+        v -> {
+          try {
+            authentication.settings();
+          } catch (RuntimeException error) {
+            authenticationMessage = "无法打开系统设置，请手动到手机设置中录入指纹";
+            renderLockGate(false);
+          }
+        });
+    lockGate.addView(settings, new LinearLayout.LayoutParams(-1, dp(52)));
+    root.addView(lockGate, new FrameLayout.LayoutParams(-1, -1));
+    try {
+      setChrome(configuration().optString("theme", "system"));
+    } catch (Exception ignored) {
+    }
+  }
+
+  private void renderLockGate(boolean automatic) {
+    if (!ready || destroyed || web == null || lockGate == null) return;
+    boolean locked = hasLock() && !unlocked;
+    web.setVisibility(locked ? View.INVISIBLE : View.VISIBLE);
+    web.setImportantForAccessibility(
+        locked
+            ? View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+            : View.IMPORTANT_FOR_ACCESSIBILITY_AUTO);
+    lockGate.setVisibility(locked ? View.VISIBLE : View.GONE);
+    if (locked) {
+      lockMessage.setText(
+          "轻记账 · 指纹解锁\n\n"
+              + (migratingPin ? "旧 PIN 将在系统验证成功后移除，账目不变。\n\n" : "")
+              + (authenticationMessage.isEmpty()
+                  ? "请使用系统指纹验证，或使用手机锁屏密码。\n应用不会读取或保存指纹。"
+                  : authenticationMessage));
+      if (automatic && resumed && !autoAuthAttempted && !authentication.busy()) {
+        autoAuthAttempted = true;
+        handler.post(() -> beginAuthentication(null, "unlock", false));
+      }
+    }
+  }
+
+  private void completeAuthentication(String id, Object value, Exception error) {
+    // Auth cancellation must reach the UI even while locked; never queue it with ledger/file data.
+    if (id != null)
+      evaluate(
+          "window.__moneybookResolve&&window.__moneybookResolve("
+              + JSONObject.quote(id)
+              + ","
+              + reply(value, error)
+              + ");");
+  }
+
+  private void beginAuthentication(String id, String action, boolean credentialOnly) {
+    final int page = pageGeneration;
+    try {
+      if (!ready || !resumed || destroyed) throw new SecurityException("请返回轻记账后重试验证");
+      if (!LockPolicy.validAction(action)) throw new SecurityException("不支持的验证操作");
+      if (!"unlock".equals(action)) requireUnlocked();
+      if ("enable".equals(action) && !authentication.available())
+        throw new IllegalStateException("请先到系统设置中录入指纹，再开启指纹解锁");
+      authentication.authenticate(
+          "disable".equals(action) ? "验证后关闭指纹解锁" : "轻记账 · 指纹解锁",
+          credentialOnly,
+          (success, message) -> {
+            long verifiedAt = SystemClock.elapsedRealtime();
+            Runnable finish =
+                () -> {
+                  if (page != pageGeneration || destroyed) return;
+                  try {
+                    if (!LockPolicy.accept(success, page, pageGeneration, destroyed)
+                        || SystemClock.elapsedRealtime() - verifiedAt > 10_000)
+                      throw new SecurityException(message.isEmpty() ? "验证已失效，请重试" : message);
+                    synchronized (operations) {
+                      boolean next =
+                          "disable".equals(action)
+                              ? false
+                              : "enable".equals(action) || migratingPin || biometricEnabled;
+                      // Only a verified native callback changes these settings. Failure keeps the
+                      // in-memory gate.
+                      if (!preferences
+                          .edit()
+                          .putBoolean("biometricEnabled", next)
+                          .remove("pin")
+                          .remove("pinLength")
+                          .remove("pinFailures")
+                          .remove("pinBlockedUntil")
+                          .commit()) throw new IllegalStateException("解锁设置保存失败，请重试；原保护仍保留");
+                      biometricEnabled = next;
+                      migratingPin = false;
+                      unlocked = true;
+                      backgroundAt = 0;
+                    }
+                    authenticationMessage = "";
+                    setChrome(configuration().optString("theme", "system"));
+                    renderLockGate(false);
+                    evaluate("window.MoneyBookPlatform&&window.MoneyBookPlatform.resume(false);");
+                    completeAuthentication(id, authentication.info(hasLock(), migratingPin), null);
+                    flushDeferred();
+                  } catch (Exception error) {
+                    authenticationMessage = error.getMessage();
+                    renderLockGate(false);
+                    completeAuthentication(id, null, error);
+                  }
+                };
+            // Legacy system-credential results can arrive just before Activity.onResume().
+            if (success && !resumed) verifiedOnResume = finish;
+            else finish.run();
+          });
+    } catch (Exception error) {
+      authenticationMessage = error.getMessage();
+      renderLockGate(false);
+      completeAuthentication(id, null, error);
+    }
   }
 
   private void setChrome(String theme) {
@@ -335,7 +497,11 @@ public final class MainActivity extends Activity {
     }
     getWindow().getDecorView().setSystemUiVisibility(appearance);
     if (root != null) root.setBackgroundColor(color);
-    if (hasPin()) getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
+    if (lockGate != null) {
+      lockGate.setBackgroundColor(color);
+      lockMessage.setTextColor(dark ? 0xfffff0e4 : 0xff3c291d);
+    }
+    if (hasLock()) getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
     else getWindow().clearFlags(WindowManager.LayoutParams.FLAG_SECURE);
   }
 
@@ -366,18 +532,16 @@ public final class MainActivity extends Activity {
       database.state(SharedUiState.CONFIG, config.toString());
     } else config = new JSONObject(raw);
     if (!preferences.getString("backupUri", "").isEmpty()) config.put("backupTarget", "folder");
-    JSONObject pin = SharedUiState.publicPin(hasPin(), preferences.getInt("pinLength", 0));
-    config.put("pin", pin == null ? JSONObject.NULL : pin);
+    config.put("pin", JSONObject.NULL);
+    config.put("biometric", authentication.info(hasLock(), migratingPin));
     return config;
   }
 
   private void requireUnlocked() throws Exception {
     long delay = configuration().optLong("lockDelay", 60_000);
-    if (hasPin()
-        && backgroundAt > 0
-        && delay >= 0
-        && SystemClock.elapsedRealtime() - backgroundAt >= delay) unlocked = false;
-    if (!unlocked && hasPin()) throw new SecurityException("请先解锁账本");
+    if (LockPolicy.expired(hasLock(), backgroundAt, SystemClock.elapsedRealtime(), delay))
+      unlocked = false;
+    if (!unlocked && hasLock()) throw new SecurityException("请先使用指纹解锁账本");
   }
 
   private static String reply(Object value, Exception error) {
@@ -410,13 +574,13 @@ public final class MainActivity extends Activity {
     handler.post(
         () -> {
           Runnable callback = () -> evaluate(script);
-          if (!ready || (hasPin() && !unlocked)) deferred.add(callback);
+          if (!ready || (hasLock() && !unlocked)) deferred.add(callback);
           else callback.run();
         });
   }
 
   private void flushDeferred() {
-    if (!ready || (hasPin() && !unlocked)) return;
+    if (!ready || (hasLock() && !unlocked)) return;
     List<Runnable> callbacks = new ArrayList<>(deferred);
     deferred.clear();
     for (Runnable callback : callbacks) callback.run();
@@ -482,6 +646,8 @@ public final class MainActivity extends Activity {
           switch (operation) {
             case "info":
               return reply(new JSONObject().put("version", BuildConfig.VERSION_NAME), null);
+            case "biometricInfo":
+              return reply(authentication.info(hasLock(), migratingPin), null);
             case "get":
               {
                 String key = args.getString("key");
@@ -557,76 +723,27 @@ public final class MainActivity extends Activity {
                         .put("budgetSaved", true),
                     null);
               }
-            case "pinVerify":
-              {
-                long until = preferences.getLong("pinBlockedUntil", 0);
-                if (System.currentTimeMillis() < until) throw new SecurityException("连续错误，请稍后再试");
-                String pin = args.getString("pin");
-                boolean valid = PinLock.verify(pin, preferences.getString("pin", ""));
-                if (valid) {
-                  unlocked = true;
-                  backgroundAt = 0;
-                  preferences
-                      .edit()
-                      .putInt("pinLength", pin.length())
-                      .remove("pinFailures")
-                      .remove("pinBlockedUntil")
-                      .commit();
-                  handler.post(MainActivity.this::flushDeferred);
-                } else {
-                  int failures = preferences.getInt("pinFailures", 0) + 1;
-                  SharedPreferences.Editor editor =
-                      preferences.edit().putInt("pinFailures", failures >= 5 ? 0 : failures);
-                  if (failures >= 5)
-                    editor.putLong("pinBlockedUntil", System.currentTimeMillis() + 30_000);
-                  editor.commit();
-                }
-                return reply(valid, null);
-              }
-            case "pinSet":
-              {
-                requireUnlocked();
-                String pin = args.getString("pin");
-                String encoded = PinLock.encode(pin);
-                if (!preferences
-                    .edit()
-                    .putString("pin", encoded)
-                    .putInt("pinLength", pin.length())
-                    .commit()) throw new IllegalStateException("PIN 未能保存");
-                handler.post(
-                    () -> {
-                      try {
-                        setChrome(configuration().optString("theme", "system"));
-                      } catch (Exception ignored) {
-                      }
-                    });
-                return reply(SharedUiState.publicPin(true, pin.length()), null);
-              }
-            case "pinDisable":
-              {
-                requireUnlocked();
-                if (!preferences.edit().remove("pin").remove("pinLength").commit())
-                  throw new IllegalStateException("PIN 设置未能保存");
-                handler.post(() -> getWindow().clearFlags(WindowManager.LayoutParams.FLAG_SECURE));
-                return reply(true, null);
-              }
             case "lock":
-              unlocked = !hasPin();
+              boolean previouslyUnlocked = unlocked;
+              unlocked = !hasLock();
+              handler.post(
+                  () -> {
+                    if (previouslyUnlocked && !unlocked) autoAuthAttempted = false;
+                    renderLockGate(true);
+                  });
               return reply(true, null);
             case "theme":
               handler.post(() -> setChrome(args.optString("theme", "system")));
               return reply(true, null);
             case "ready":
-              if (hasPin() && !unlocked && !args.optBoolean("pinShown", false))
-                throw new SecurityException("密码界面未能初始化，已停止显示账本");
               handler.post(
                   () -> {
                     ready = true;
-                    if (web != null) web.setVisibility(View.VISIBLE);
                     if (startupMessage != null) {
                       root.removeView(startupMessage);
                       startupMessage = null;
                     }
+                    renderLockGate(true);
                     flushDeferred();
                   });
               return reply(true, null);
@@ -643,8 +760,23 @@ public final class MainActivity extends Activity {
     public void request(String id, String operation, String arguments) {
       try {
         JSONObject args = new JSONObject(arguments);
-        if ("forgotPin".equals(operation)) {
-          handler.post(() -> forgotPin(id));
+        if ("biometricAuth".equals(operation)) {
+          handler.post(
+              () ->
+                  beginAuthentication(
+                      id, args.optString("action"), args.optBoolean("credentialOnly")));
+          return;
+        }
+        if ("biometricSettings".equals(operation)) {
+          handler.post(
+              () -> {
+                try {
+                  authentication.settings();
+                  completeAuthentication(id, true, null);
+                } catch (Exception error) {
+                  completeAuthentication(id, null, error);
+                }
+              });
           return;
         }
         synchronized (operations) {
@@ -725,6 +857,7 @@ public final class MainActivity extends Activity {
   @Override
   protected void onActivityResult(int code, int result, Intent data) {
     super.onActivityResult(code, result, data);
+    if (authentication != null && authentication.activityResult(code, result)) return;
     String id = pickerId, operation = pickerOperation, content = pendingContent;
     pickerId = null;
     pickerOperation = null;
@@ -766,65 +899,17 @@ public final class MainActivity extends Activity {
                 });
     handler.post(
         () -> {
-          if (hasPin() && !unlocked) deferred.add(job);
+          if (hasLock() && !unlocked) deferred.add(job);
           else job.run();
         });
   }
 
-  private void forgotPin(String id) {
-    EditText confirmation = new EditText(this);
-    confirmation.setHint("输入「清空」确认");
-    int padding = Math.round(24 * getResources().getDisplayMetrics().density);
-    confirmation.setPadding(padding, padding, padding, padding);
-    AlertDialog dialog =
-        new AlertDialog.Builder(this)
-            .setTitle("清空数据并重置 PIN")
-            .setMessage("此操作删除本机账目、预算、PIN 和全部本机快照，未备份数据无法恢复。外部备份保留。")
-            .setView(confirmation)
-            .setPositiveButton("确认清空", null)
-            .setNegativeButton("取消", (d, w) -> complete(id, null, new IllegalStateException("已取消")))
-            .setOnCancelListener(d -> complete(id, null, new IllegalStateException("已取消")))
-            .create();
-    dialog.setOnShowListener(
-        v ->
-            dialog
-                .getButton(-1)
-                .setOnClickListener(
-                    button -> {
-                      if (!"清空".equals(confirmation.getText().toString())) {
-                        confirmation.setError("请输入「清空」");
-                        return;
-                      }
-                      dialog.getButton(-1).setEnabled(false);
-                      executor.execute(
-                          () -> {
-                            synchronized (operations) {
-                              try {
-                                database.clearLedger();
-                                files.clearSnapshots();
-                                if (!preferences.edit().clear().commit())
-                                  throw new IllegalStateException("设置清理失败");
-                                unlocked = true;
-                                handler.post(
-                                    () -> {
-                                      deferred.clear();
-                                      dialog.dismiss();
-                                      complete(id, true, null);
-                                    });
-                              } catch (Exception error) {
-                                handler.post(
-                                    () -> {
-                                      dialog.getButton(-1).setEnabled(true);
-                                      confirmation.setError("重置未完成：" + error.getMessage());
-                                    });
-                              }
-                            }
-                          });
-                    }));
-    dialog.show();
-  }
-
   private void handleBack() {
+    if (hasLock() && !unlocked) {
+      authentication.cancel();
+      moveTaskToBack(true);
+      return;
+    }
     if (!ready || web == null) {
       moveTaskToBack(true);
       return;
@@ -844,21 +929,37 @@ public final class MainActivity extends Activity {
   @Override
   protected void onStop() {
     backgroundAt = SystemClock.elapsedRealtime();
+    if (authentication != null && !authentication.waitingForCredential()) authentication.cancel();
     super.onStop();
+  }
+
+  @Override
+  protected void onPause() {
+    resumed = false;
+    super.onPause();
   }
 
   @Override
   protected void onResume() {
     super.onResume();
+    resumed = true;
     if (database == null || bridge == null) return;
+    boolean previouslyUnlocked = unlocked;
     try {
       requireUnlocked();
     } catch (Exception error) {
       unlocked = false;
     }
-    boolean lock = hasPin() && !unlocked;
+    if (previouslyUnlocked && !unlocked) autoAuthAttempted = false;
+    if (verifiedOnResume != null) {
+      Runnable verified = verifiedOnResume;
+      verifiedOnResume = null;
+      verified.run();
+    }
+    boolean lock = hasLock() && !unlocked;
     backgroundAt = 0;
     if (ready) evaluate("window.MoneyBookPlatform&&window.MoneyBookPlatform.resume(" + lock + ");");
+    renderLockGate(true);
   }
 
   @Override
@@ -873,6 +974,8 @@ public final class MainActivity extends Activity {
   @Override
   protected void onDestroy() {
     destroyed = true;
+    if (authentication != null) authentication.cancel();
+    verifiedOnResume = null;
     handler.removeCallbacksAndMessages(null);
     deferred.clear();
     if (web != null) {

@@ -24,6 +24,7 @@
 }
 /* The Android host already pads the WebView around system bars, cutouts and the keyboard. */
 :root[data-platform="android"]{--safe-t:0px;--safe-b:0px}
+:root[data-platform="android"] #lock{display:none!important}
 @media (prefers-color-scheme: dark){
   :root:not([data-theme="light"]){ color-scheme:dark; --bg:#1c1510; --card:#2a2018; --fg:#fff0e4; --muted:#bcaa9b; --line:#443326;
     --brand:#ffae64; --brand-fg:#321907; --brand-soft:#4c2d15; --hero-start:#f7b35b; --hero-end:#e48a3a; --hero-fg:#351a08; --exp:#ff8c73; --inc:#77d4a5;
@@ -542,12 +543,13 @@ body[data-view="stats"] .fab,body[data-view="me"] .fab{display:none}
       <div class="card" style="padding:0;overflow:hidden;margin-bottom:14px">
         <div class="setrow"><div class="t">外观主题<small>选一个看着舒服的账本</small></div><select id="themeSelect" aria-label="外观主题" style="background:var(--bg);border-radius:10px;padding:8px 10px;font-size:14px"><option value="system">跟随系统</option><option value="light">浅色</option><option value="dark">深色</option></select></div>
         <div class="setrow">
-          <div class="t">密码锁<small>打开 App 需输入 PIN 码</small></div>
+          <div class="t"><span id="lockSettingLabel">密码锁</span><small id="lockSettingHint">打开 App 需输入 PIN 码</small></div>
           <button class="switch" id="pinSwitch" role="switch" aria-label="密码锁" aria-checked="false"></button>
         </div>
         <button class="setrow" id="changePinRow" hidden>
           <div class="t">修改 PIN 码</div><div class="v">›</div>
         </button>
+        <button class="setrow" id="biometricSettingsRow" hidden><div class="t">系统指纹设置<small>录入或管理手机的指纹</small></div><div class="v">›</div></button>
         <div class="setrow" id="lockDelayRow">
           <div class="t">自动锁定<small>切到后台多久后重新加锁</small></div>
           <select id="lockDelay" style="background:var(--bg);border-radius:10px;padding:8px 10px;font-size:14px">
@@ -730,7 +732,7 @@ var PALETTE = ['#ed8a2d','#f4bb46','#d56545','#996fca','#6f9b69','#d88aaa','#72a
 var WEEK = ['日','一','二','三','四','五','六'];
 var TYPE_NAME = { expense:'支出', income:'收入' };
 /* 发布时同步此版本与 sw.js 缓存版本；界面和备份从此读取。 */
-var APP_VERSION = '1.5.6';
+var APP_VERSION = '1.5.7';
 var MAX_CENTS = 99999999999;
 
 function $(id){ return document.getElementById(id); }
@@ -1615,16 +1617,22 @@ function renderMe(){
   balEl.textContent = (bal < 0 ? '-' : '') + '¥' + yuan(Math.abs(bal));
   balEl.style.color = bal < 0 ? 'var(--exp)' : (bal > 0 ? 'var(--inc)' : 'var(--muted)');
 
-  setSwitch($('pinSwitch'), !!cfg.pin);
+  if(platform){
+    $('lockSettingLabel').textContent = '指纹解锁';
+    $('lockSettingHint').textContent = cfg.biometric ? cfg.biometric.description : '使用手机系统指纹验证';
+    $('pinSwitch').setAttribute('aria-label', '指纹解锁');
+  }
+  setSwitch($('pinSwitch'), appLockEnabled());
   setSwitch($('snapSwitch'), cfg.snapOn !== false);
   $('autoExport').value = Object.prototype.hasOwnProperty.call(EXPORT_MS, cfg.autoExport) ? cfg.autoExport : 'weekly';
   var bl = loadBackups();
   $('snapCountInfo').textContent = bl.length ? ('共 ' + bl.length + ' 份，最近 ' + stamp(bl[0].ts)) : '还没有快照';
   $('lastExportInfo').textContent = cfg.lastExport ? ('上次导出 ' + stamp(cfg.lastExport)) : '还没有导出过';
-  $('changePinRow').hidden = !cfg.pin;
-  $('lockDelayRow').style.opacity = cfg.pin ? '1' : '.45';
+  $('changePinRow').hidden = !!platform || !cfg.pin;
+  $('biometricSettingsRow').hidden = !platform;
+  $('lockDelayRow').style.opacity = appLockEnabled() ? '1' : '.45';
   $('lockDelay').value = String(cfg.lockDelay);
-  $('lockDelay').disabled = !cfg.pin;
+  $('lockDelay').disabled = !appLockEnabled();
   renderBackupLocation();
 }
 
@@ -1720,12 +1728,15 @@ function deleteEntry(){
 /* ===================== 密码锁 ===================== */
 var pinBuf = '', pinMode = 'unlock', pinFirst = '';
 function pinLen(){ return (cfg.pin && cfg.pin.len) || 4; }
+function appLockEnabled(){ return platform ? !!(cfg.biometric && cfg.biometric.enabled) : !!cfg.pin; }
 
 function lockNow(){
-  if(!cfg.pin) return;
+  if(!appLockEnabled()) return;
   setSearchOpen(false);
-  if(platform) platform.lock();
   state.locked = true;
+  $('app').inert = true; $('fab').inert = true; $('sheet').inert = true; $('panel').inert = true;
+  $('toast').classList.remove('show'); $('toastUndo').hidden = true; $('updateBar').hidden = true;
+  if(platform){ $('lock').hidden = true; platform.lock(); return; }
   pinBuf = ''; pinMode = 'unlock'; pinFirst = '';
   $('lock').hidden = false;
   $('lockTitle').textContent = '输入密码';
@@ -1753,6 +1764,7 @@ function unlockUI(){
   setTimeout(maybeAutoExport, 800);   // 被锁屏挡住的自动导出，解锁后再做
 }
 function renderDots(){
+  if(platform){ $('lockDots').innerHTML = ''; return; }
   var n = pinMode === 'unlock' ? pinLen() : Math.max(4, pinBuf.length);
   if(platform && cfg.pin && cfg.pin.unknownLength && pinMode === 'unlock') n = Math.max(4, pinBuf.length);
   var d = $('lockDots'), html = '';
@@ -1786,14 +1798,9 @@ function pinError(msg){
   setTimeout(function(){ renderDots(); }, 120);
 }
 function submitPin(){
+  if(platform) return; // APKs use only native system authentication, never an application PIN.
   if($('lock').hidden || (pinMode === 'unlock' && !cfg.pin)) return;
   if(pinMode === 'unlock'){
-    if(platform){
-      try{
-        if(platform.verifyPin(pinBuf)){ cfg = loadJSON(KEY_CFG, cfg); $('lockHint').textContent = ''; unlockUI(); }
-        else pinError('密码不正确，请重试');
-      }catch(error){ pinError(error.message); } return;
-    }
     if(pinHash(pinBuf, cfg.pin.salt) === cfg.pin.hash && pinBuf.length === pinLen()){
       $('lockHint').textContent = '';
       unlockUI();
@@ -1811,10 +1818,6 @@ function submitPin(){
   if(pinMode === 'confirm'){
     if(pinBuf !== pinFirst){ pinFirst=''; pinMode='set'; pinBuf=''; $('lockTitle').textContent='设置密码';
       pinError('两次输入不一致，请重新设置'); return; }
-    if(platform){
-      try{ cfg.pin = platform.setPin(pinBuf); $('lockHint').textContent = ''; unlockUI(); renderMe(); toast('密码已设置'); }
-      catch(error){ pinError(error.message); } return;
-    }
     var salt = Math.random().toString(36).slice(2,10) + Date.now().toString(36);
     var previousPin = cfg.pin;
     cfg.pin = { salt: salt, hash: pinHash(pinBuf, salt), len: pinBuf.length };
@@ -1826,6 +1829,7 @@ function submitPin(){
   }
 }
 function startSetPin(){
+  if(platform) return;
   pinMode = 'set'; pinBuf = ''; pinFirst = '';
   $('lock').hidden = false;
   $('lockTitle').textContent = '设置密码';
@@ -1837,6 +1841,7 @@ function startSetPin(){
   renderDots();
 }
 function buildPad(){
+  if(platform){ $('pad').innerHTML = ''; return; }
   var keys = ['1','2','3','4','5','6','7','8','9','blank','0','del'];
   var html = '';
   keys.forEach(function(k){
@@ -1972,9 +1977,18 @@ $('statSeg').addEventListener('click', function(e){
 });
 
 $('pinSwitch').onclick = function(){
+  if(platform){
+    if($('pinSwitch').disabled) return;
+    var enable = !appLockEnabled();
+    if(!enable && !confirm('关闭指纹解锁？需要先完成一次系统验证。')) return;
+    $('pinSwitch').disabled = true;
+    platform.setBiometric(enable).then(function(){
+      cfg = loadJSON(KEY_CFG, cfg); renderMe(); toast(enable ? '已开启指纹解锁' : '已关闭指纹解锁');
+    }, function(error){ renderMe(); toast(error.message || '验证未完成，原设置保持不变'); }).finally(function(){ $('pinSwitch').disabled = false; });
+    return;
+  }
   if(cfg.pin){
     if(confirm('关闭密码锁？下次打开将不再需要密码。')){
-      if(platform){ try{ platform.disablePin(); cfg.pin = null; renderMe(); toast('已关闭密码锁'); }catch(error){ toast(error.message); } return; }
       var previous = cfg.pin; cfg.pin = null;
       if(!persistCfg()){ cfg.pin = previous; return; }
       renderMe(); toast('已关闭密码锁');
@@ -1984,6 +1998,7 @@ $('pinSwitch').onclick = function(){
   }
 };
 $('changePinRow').onclick = function(){ startSetPin(); };
+$('biometricSettingsRow').onclick = function(){ if(platform) platform.biometricSettings().catch(nativeFileError); };
 $('lockDelay').onchange = function(){
   var previous = cfg.lockDelay; cfg.lockDelay = parseInt(this.value, 10);
   if(!persistCfg()){ cfg.lockDelay = previous; renderMe(); return; }
@@ -2088,7 +2103,7 @@ $('panelReplace').onclick = function(){
   toast('已恢复 ' + res.after + ' 条记录（原 ' + res.before + ' 条已存入快照）' + (res.budgetSaved ? '' : '；预算未能保存，请检查存储空间'));
 };
 $('forgotBtn').onclick = function(){
-  if(platform){ platform.forgotPin().then(function(){ location.reload(); }, nativeFileError); return; }
+  if(platform) return;
   if(!confirm('忘记密码只能清空本机数据后重新开始（数据未加密保存，密码无法找回）。\n\n确定清空？')) return;
   var locked = state.locked; state.locked = false;
   if(!commitRecords([], true)){ state.locked = locked; return; }
@@ -2103,6 +2118,7 @@ $('pad').addEventListener('click', function(e){
   pinKey(b.dataset.k);
 });
 document.addEventListener('keydown', function(e){
+  if(platform && state.locked) return;
   if(!$('lock').hidden){
     if(/^[0-9]$/.test(e.key)) pinKey(e.key);
     else if(e.key === 'Backspace') pinKey('del');
@@ -2131,8 +2147,9 @@ window.addEventListener('storage', function(e){ if(e.key === KEY_REC || e.key ==
 /* 回到前台自动加锁 */
 var hiddenAt = 0;
 document.addEventListener('visibilitychange', function(){
+  if(platform) return; // Native lifecycle is authoritative, including returns from system authentication.
   if(document.hidden){ hiddenAt = Date.now(); return; }
-  if(!cfg.pin || state.locked || cfg.lockDelay < 0) return;
+  if(!appLockEnabled() || state.locked || cfg.lockDelay < 0) return;
   if(hiddenAt && (Date.now() - hiddenAt) >= cfg.lockDelay) lockNow();
 });
 
@@ -2148,7 +2165,7 @@ $('appVer').textContent = APP_VERSION;   // 版本号以常量为唯一来源，
 renderList(); renderStats(); renderMe();
 var hashView = (location.hash || '').replace('#','');
 if(hashView === 'stats' || hashView === 'me') switchView(hashView);
-if(cfg.pin) lockNow();
+if(appLockEnabled()) lockNow();
 restoreBackupDirectory();
 
 /* 每天首次打开自动存一份快照；到期的自动导出延迟执行，别和首屏抢资源 */
@@ -2202,9 +2219,12 @@ if(platform){
   var versionLine = document.querySelector('.verline');
   if(versionLine) versionLine.innerHTML = '轻记账 Android <span id="appVer">' + esc(platform.version) + '</span> · 本机离线 · Web ' + APP_VERSION;
   platform.connect({
-    resume:function(shouldLock){ if(shouldLock) lockNow(); else setTimeout(maybeAutoExport, 800); },
+    resume:function(shouldLock){
+      cfg = loadJSON(KEY_CFG, cfg);
+      if(shouldLock) lockNow(); else { if(state.locked) unlockUI(); else setTimeout(maybeAutoExport, 800); renderMe(); }
+    },
     back:function(){
-      if(!$('lock').hidden) return false;
+      if(state.locked || !$('lock').hidden) return false;
       if(!$('searchPopover').hidden){ setSearchOpen(false, true); return true; }
       if($('sheet').classList.contains('show')){ closeEntry(); return true; }
       if($('panel').classList.contains('show')){ closePanel(); return true; }
