@@ -549,7 +549,6 @@ body[data-view="stats"] .fab,body[data-view="me"] .fab{display:none}
         <button class="setrow" id="changePinRow" hidden>
           <div class="t">修改 PIN 码</div><div class="v">›</div>
         </button>
-        <button class="setrow" id="biometricSettingsRow" hidden><div class="t">系统指纹设置<small>录入或管理手机的指纹</small></div><div class="v">›</div></button>
         <div class="setrow" id="lockDelayRow">
           <div class="t">自动锁定<small>切到后台多久后重新加锁</small></div>
           <select id="lockDelay" style="background:var(--bg);border-radius:10px;padding:8px 10px;font-size:14px">
@@ -732,7 +731,7 @@ var PALETTE = ['#ed8a2d','#f4bb46','#d56545','#996fca','#6f9b69','#d88aaa','#72a
 var WEEK = ['日','一','二','三','四','五','六'];
 var TYPE_NAME = { expense:'支出', income:'收入' };
 /* 发布时同步此版本与 sw.js 缓存版本；界面和备份从此读取。 */
-var APP_VERSION = '1.5.7';
+var APP_VERSION = '1.5.8';
 var MAX_CENTS = 99999999999;
 
 function $(id){ return document.getElementById(id); }
@@ -1629,7 +1628,6 @@ function renderMe(){
   $('snapCountInfo').textContent = bl.length ? ('共 ' + bl.length + ' 份，最近 ' + stamp(bl[0].ts)) : '还没有快照';
   $('lastExportInfo').textContent = cfg.lastExport ? ('上次导出 ' + stamp(cfg.lastExport)) : '还没有导出过';
   $('changePinRow').hidden = !!platform || !cfg.pin;
-  $('biometricSettingsRow').hidden = !platform;
   $('lockDelayRow').style.opacity = appLockEnabled() ? '1' : '.45';
   $('lockDelay').value = String(cfg.lockDelay);
   $('lockDelay').disabled = !appLockEnabled();
@@ -1998,7 +1996,6 @@ $('pinSwitch').onclick = function(){
   }
 };
 $('changePinRow').onclick = function(){ startSetPin(); };
-$('biometricSettingsRow').onclick = function(){ if(platform) platform.biometricSettings().catch(nativeFileError); };
 $('lockDelay').onchange = function(){
   var previous = cfg.lockDelay; cfg.lockDelay = parseInt(this.value, 10);
   if(!persistCfg()){ cfg.lockDelay = previous; renderMe(); return; }

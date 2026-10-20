@@ -1,6 +1,6 @@
 /* 轻记账 · 导航网络优先，静态资源缓存优先。按应用路径隔离缓存。 */
 const CACHE_PREFIX = 'jz-' + self.registration.scope;
-const VERSION = CACHE_PREFIX + '1.5.7';
+const VERSION = CACHE_PREFIX + '1.5.8';
 const ASSETS = [
   './',
   './index.html',

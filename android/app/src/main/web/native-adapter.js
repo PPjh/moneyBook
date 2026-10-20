@@ -51,7 +51,6 @@
     importRows: function (rows, mode, config, expected) { return call('import', { rows: rows, mode: mode, config: config || {}, expected: expected }); },
     biometricInfo: function () { return call('biometricInfo'); },
     setBiometric: function (enabled) { return request('biometricAuth', { action: enabled ? 'enable' : 'disable' }); },
-    biometricSettings: function () { return request('biometricSettings'); },
     lock: function () { return call('lock'); },
     theme: function (theme) { call('theme', { theme: theme }); },
     pickerBusy: function () { return Object.keys(pending).length > 0; },

@@ -11,7 +11,6 @@ import android.os.Build;
 import android.os.CancellationSignal;
 import android.os.Handler;
 import android.os.Looper;
-import android.provider.Settings;
 import org.json.JSONObject;
 
 /** System-owned authentication only. Never receives fingerprint data or a device credential. */
@@ -75,11 +74,7 @@ public final class BiometricAuth {
         .put("migrating", migrating)
         .put("available", enrolled)
         .put("deviceCredential", secure)
-        .put(
-            "description",
-            enrolled
-                ? "使用系统已录入的指纹／生物识别；可用手机锁屏密码备用"
-                : secure ? "请在系统设置中录入指纹；已开启的保护可用手机锁屏密码验证" : "请先在手机系统设置中设置锁屏并录入指纹");
+        .put("description", enrolled ? "使用系统已录入的指纹／生物识别；可用手机锁屏密码备用" : "未检测到可用指纹");
   }
 
   public void authenticate(String title, boolean credentialOnly, Callback result) {
@@ -155,7 +150,7 @@ public final class BiometricAuth {
             main);
       }
     } catch (RuntimeException error) {
-      finish(token, false, "无法启动系统验证，请使用手机锁屏密码或检查系统指纹设置");
+      finish(token, false, "无法启动指纹验证，请稍后重试或使用手机锁屏密码");
     }
   }
 
@@ -172,14 +167,14 @@ public final class BiometricAuth {
       legacyDialog = null;
     }
     if (!deviceSecure()) {
-      finish(next, false, "请先在手机系统设置中设置锁屏并录入指纹，本机账目仍保留");
+      finish(next, false, "当前没有可用的解锁方式，本机账目仍保留");
       return;
     }
     try {
       KeyguardManager manager = activity.getSystemService(KeyguardManager.class);
       Intent intent = manager.createConfirmDeviceCredentialIntent("验证手机锁屏", "验证后继续使用轻记账；不是原应用 PIN");
       if (intent == null) {
-        finish(next, false, "当前系统无法验证锁屏密码，请检查系统安全设置");
+        finish(next, false, "当前无法验证手机锁屏密码，请稍后重试");
         return;
       }
       credentialPending = true;
@@ -218,21 +213,5 @@ public final class BiometricAuth {
 
   public void cancel() {
     if (callback != null) finish(generation, false, "验证已中止，请重试");
-  }
-
-  public void settings() {
-    Intent intent;
-    if (Build.VERSION.SDK_INT >= 30)
-      intent =
-          new Intent(Settings.ACTION_BIOMETRIC_ENROLL)
-              .putExtra(
-                  Settings.EXTRA_BIOMETRIC_AUTHENTICATORS_ALLOWED,
-                  BiometricManager.Authenticators.BIOMETRIC_STRONG);
-    else intent = new Intent(Settings.ACTION_SECURITY_SETTINGS);
-    try {
-      activity.startActivity(intent);
-    } catch (RuntimeException error) {
-      activity.startActivity(new Intent(Settings.ACTION_SETTINGS));
-    }
   }
 }

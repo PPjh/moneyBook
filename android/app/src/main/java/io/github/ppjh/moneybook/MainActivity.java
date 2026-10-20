@@ -361,18 +361,6 @@ public final class MainActivity extends Activity {
     credential.setText("使用手机锁屏密码");
     credential.setOnClickListener(v -> beginAuthentication(null, "unlock", true));
     lockGate.addView(credential, new LinearLayout.LayoutParams(-1, dp(52)));
-    Button settings = new Button(this);
-    settings.setText("系统指纹设置");
-    settings.setOnClickListener(
-        v -> {
-          try {
-            authentication.settings();
-          } catch (RuntimeException error) {
-            authenticationMessage = "无法打开系统设置，请手动到手机设置中录入指纹";
-            renderLockGate(false);
-          }
-        });
-    lockGate.addView(settings, new LinearLayout.LayoutParams(-1, dp(52)));
     root.addView(lockGate, new FrameLayout.LayoutParams(-1, -1));
     try {
       setChrome(configuration().optString("theme", "system"));
@@ -421,7 +409,7 @@ public final class MainActivity extends Activity {
       if (!LockPolicy.validAction(action)) throw new SecurityException("不支持的验证操作");
       if (!"unlock".equals(action)) requireUnlocked();
       if ("enable".equals(action) && !authentication.available())
-        throw new IllegalStateException("请先到系统设置中录入指纹，再开启指纹解锁");
+        throw new IllegalStateException("未检测到可用指纹");
       authentication.authenticate(
           "disable".equals(action) ? "验证后关闭指纹解锁" : "轻记账 · 指纹解锁",
           credentialOnly,
@@ -765,18 +753,6 @@ public final class MainActivity extends Activity {
               () ->
                   beginAuthentication(
                       id, args.optString("action"), args.optBoolean("credentialOnly")));
-          return;
-        }
-        if ("biometricSettings".equals(operation)) {
-          handler.post(
-              () -> {
-                try {
-                  authentication.settings();
-                  completeAuthentication(id, true, null);
-                } catch (Exception error) {
-                  completeAuthentication(id, null, error);
-                }
-              });
           return;
         }
         synchronized (operations) {

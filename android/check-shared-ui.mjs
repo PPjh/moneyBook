@@ -12,6 +12,14 @@ const { chromium } = require('playwright');
 const output = join(root, 'app/build/ui-checks'); mkdirSync(output, { recursive: true });
 const source = readFileSync(join(root, '../web/index.html'), 'utf8');
 const adapter = readFileSync(join(root, 'app/src/main/web/native-adapter.js'), 'utf8');
+const activity = readFileSync(join(root, 'app/src/main/java/io/github/ppjh/moneybook/MainActivity.java'), 'utf8');
+const authentication = readFileSync(join(root, 'app/src/main/java/io/github/ppjh/moneybook/BiometricAuth.java'), 'utf8');
+for (const text of [source, adapter, activity, authentication]) {
+  assert.doesNotMatch(text, /系统指纹设置|biometricSettings|ACTION_BIOMETRIC_ENROLL|ACTION_SECURITY_SETTINGS/,
+    'bundled settings, lock gate and bridge must not expose fingerprint settings or enrollment navigation');
+}
+assert.match(activity, /throw new IllegalStateException\("未检测到可用指纹"\)/);
+assert.match(authentication, /: "未检测到可用指纹"/);
 const version = readFileSync(join(root, 'app/build.gradle'), 'utf8').match(/versionName '([^']+)'/)[1];
 const date = new Date(), month = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
 const rows = [
@@ -100,10 +108,13 @@ async function context(native, pin = null, options = {}) {
           if(op==='biometricAuth') {
             if(state.failAuth)throw Error('系统验证失败，原设置保持不变');
             if(a.action!=='unlock')requireUnlocked();
-            if(a.action==='enable'&&!state.biometric.available)throw Error('请先录入指纹');
+            if(a.action==='enable'&&!state.biometric.available)throw Error('未检测到可用指纹');
             state.biometric.enabled=a.action!=='disable';state.biometric.migrating=false;state.pin=null;state.locked=false;
             value=state.biometric;save();window.MoneyBookPlatform.resume(false);
-          } else if(op!=='biometricSettings')requireUnlocked();
+          } else {
+            requireUnlocked();
+            if(!['backup','chooseFolder','forgetFolder','saveFile','importFile'].includes(op))throw Error('不支持的异步操作');
+          }
           if(op==='backup') {
             if(state.failBackup)throw Error('设备存储空间不足');
             state.files.push({text:JSON.stringify({records:state.records,config:{budgets:state.config.budgets}})});
@@ -297,14 +308,32 @@ try {
   await bp.locator('[data-view="me"]').click();
   assert.equal(await bp.locator('#pinSwitch').getAttribute('aria-label'),'指纹解锁');
   assert.equal(await bp.locator('#changePinRow').isVisible(),false);
+  assert.equal(await bp.locator('#biometricSettingsRow').count(),0,'fingerprint settings row is removed, not just hidden');
+  assert.equal(await bp.evaluate(()=>typeof window.MoneyBookPlatform.biometricSettings),'undefined','no settings navigation API');
   await bp.screenshot({path:join(output,version+'-biometric-settings.png')});
   await bp.evaluate(()=>window.__nativeHarness.cancelNext=true);await bp.locator('#pinSwitch').click();
   await bp.waitForFunction(()=>!document.getElementById('pinSwitch').disabled);
   assert.equal(await bp.locator('#pinSwitch').getAttribute('aria-checked'),'false','cancel does not enable protection');
-  await bp.evaluate(()=>window.__nativeHarness.biometric.available=false);await bp.locator('#pinSwitch').click();
+  await bp.evaluate(()=>{
+    window.__nativeHarness.biometric.available=false;
+    window.__nativeHarness.biometric.description='未检测到可用指纹';
+    window.MoneyBookPlatform.resume(false);
+  });await bp.locator('#pinSwitch').click();
   await bp.waitForFunction(()=>!document.getElementById('pinSwitch').disabled);
   assert.equal(await bp.locator('#pinSwitch').getAttribute('aria-checked'),'false','unenrolled device cannot enable fingerprint');
-  await bp.evaluate(()=>window.__nativeHarness.biometric.available=true);await bp.locator('#pinSwitch').click();
+  assert.match(await bp.locator('#toast').textContent(),/^未检测到可用指纹/,'unavailable fingerprint only shows a concise notice');
+  assert.equal(await bp.locator('#lockSettingHint').textContent(),'未检测到可用指纹');
+  assert.doesNotMatch(await bp.locator('#v-me').textContent(),/系统指纹设置|请先录入|请在系统设置/);
+  await bp.screenshot({path:join(output,version+'-fingerprint-unavailable.png')});
+  assert.equal(await bp.evaluate(()=>new Promise(resolve=>{
+    window.__moneybookResolve=(id,result)=>resolve(result.ok);
+    window.MoneyBookNative.request('removed-settings-check','biometricSettings','{}');
+  })),false,'removed bridge request is rejected');
+  await bp.reload({waitUntil:'networkidle'});await bp.locator('button[data-view="me"]').click();
+  await bp.evaluate(()=>{
+    window.__nativeHarness.biometric.available=true;
+    window.__nativeHarness.biometric.description='使用系统指纹验证；可用手机锁屏密码备用';
+  });await bp.locator('#pinSwitch').click();
   await bp.waitForFunction(()=>document.getElementById('pinSwitch').getAttribute('aria-checked')==='true');
   await bp.evaluate(()=>window.__nativeHarness.failAuth=true);await bp.locator('#pinSwitch').click();
   await bp.waitForFunction(()=>!document.getElementById('pinSwitch').disabled);
@@ -333,7 +362,7 @@ try {
   await lp.evaluate(()=>window.__completeNativeBiometric(true));
   await lp.evaluate(()=>window.MoneyBookPlatform.resume(true));
   assert.equal(await lp.evaluate(()=>window.__nativeHarness.locked),true,'background relock keeps native operations protected');
-  results.push('native biometric adapter: cancel/unavailable/enable/failed disable/disable, legacy PIN migration without data loss, locked writes, reopen and background relock; OS prompt itself still needs a real device');
+  results.push('native biometric adapter: no fingerprint settings row, native button or enrollment route; unavailable only shows a notice; cancel/enable/failed disable/disable, legacy PIN migration without data loss, locked writes, reopen and background relock; OS prompt itself still needs a real device');
   await legacy.ctx.close();assert.deepEqual(errors,[]);
   writeFileSync(join(output,'results.json'),JSON.stringify({version,results,errors},null,2));
   const summary=results.map(result=>result.phoneLayouts?{phoneLayouts:result.phoneLayouts.map(({width,overview,details})=>({width,cardsHeight:overview.height,detailsTop:details.top}))}:result);
