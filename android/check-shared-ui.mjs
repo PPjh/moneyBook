@@ -14,6 +14,8 @@ const source = readFileSync(join(root, '../web/index.html'), 'utf8');
 const adapter = readFileSync(join(root, 'app/src/main/web/native-adapter.js'), 'utf8');
 const activity = readFileSync(join(root, 'app/src/main/java/io/github/ppjh/moneybook/MainActivity.java'), 'utf8');
 const authentication = readFileSync(join(root, 'app/src/main/java/io/github/ppjh/moneybook/BiometricAuth.java'), 'utf8');
+const ledger = readFileSync(join(root, 'app/src/main/java/io/github/ppjh/moneybook/Ledger.java'), 'utf8');
+const nativeCategories = field => [...ledger.match(new RegExp('String\\[\\] '+field+' = \\{([\\s\\S]*?)\\};'))[1].matchAll(/"([^"]*)"/g)].map(match=>match[1]);
 for (const text of [source, adapter, activity, authentication]) {
   assert.doesNotMatch(text, /系统指纹设置|biometricSettings|ACTION_BIOMETRIC_ENROLL|ACTION_SECURITY_SETTINGS/,
     'bundled settings, lock gate and bridge must not expose fingerprint settings or enrollment navigation');
@@ -135,6 +137,10 @@ async function context(native, pin = null, options = {}) {
 }
 try {
   const web = await context(false), native = await context(true), p = native.page;
+  for (const [type, field] of [['expense','EXPENSE'],['income','INCOME']]) {
+    const icons = nativeCategories(field+'_EMOJI');
+    assert.deepEqual(await p.evaluate(type=>window.__jz.CATS[type],type),nativeCategories(field).map((name,index)=>[name,icons[index]]),type+' categories and icons match native ledger');
+  }
   const layout = await p.evaluate(() => {
     const box = selector => { const r=document.querySelector(selector).getBoundingClientRect(); return {top:r.top,height:r.height}; };
     return {header:box('.topbar'),summary:box('.summary'),budget:box('.budget-card'),overview:box('.overview'),details:box('.list-heading'),record:box('.rec')};
@@ -190,7 +196,32 @@ try {
     }
   }
   results.push('search popup: hidden by default, focus, live filtering, active marker, Enter/Escape/outside/Tab/view-change dismissal, query preservation, clear and native back');
-  await p.locator('#fab').click();await p.locator('#amt').fill('12.5+3');await p.locator('#note').fill('共享界面新增');await p.locator('#sheetSave').click();
+  for(const x of [web,native]) {
+    const page=x.page;
+    await page.locator('#fab').click();
+    await page.locator('#cats button[data-cat="维修"]').click();
+    await page.locator('#amt').fill('12.5+3');await page.locator('#note').fill('维修测试 · 修水管');
+    if(x===native)await page.screenshot({path:join(output,version+'-repair-category.png')});
+    await page.locator('#sheetSave').click();
+    await page.locator('#categoryFilter').selectOption('维修');
+    assert.equal(await page.locator('#listBox .rec').count(),1,'repair filter excludes existing entries');
+    assert.match(await page.locator('#listBox .rec .ico').innerText(),/🔧/);
+    assert.match(await page.locator('#listBox .rec .amt').innerText(),/15\.50/);
+    await page.locator('#listBox .rec').click();
+    assert.equal(await page.locator('#cats button[data-cat="维修"]').evaluate(el=>el.classList.contains('on')),true,'editing preserves repair category');
+    await page.locator('#amt').fill('20');await page.locator('#sheetSave').click();
+    await page.locator('button[data-view="stats"]').click();
+    assert.match(await page.locator('#rankBox .ri').filter({hasText:'维修'}).innerText(),/20\.00/,'repair included in expense ranking');
+    assert.match(await page.locator('#donutCard').innerText(),/维修/,'repair included in chart legend');
+    const backup=await page.evaluate(()=>window.__jz.buildBackup());
+    assert.equal(backup.records.find(r=>r.cat==='维修').amount,2000,'repair category and amount retained by JSON backup');
+    await page.locator('button[data-view="list"]').click();
+    await page.locator('#categoryFilter').selectOption('');
+    await page.reload({waitUntil:'networkidle'});
+    assert.equal(await page.locator('#listCount').innerText(),'4 笔记录','new repair and original rows survive reopen');
+    assert.equal(await page.locator('#listBox .rec').filter({hasText:'维修测试'}).count(),1);
+  }
+  results.push('repair expense: Web/native category and icon parity, add/edit/filter, chart/ranking, JSON backup and reopen preserve new and existing rows');
   assert.equal(await p.evaluate(()=>window.__nativeHarness.records.length),4);
   assert.equal(await p.evaluate(()=>window.__nativeHarness.records.find(r=>r.id==='existing-native-a').amount),3800);
   await p.reload({waitUntil:'networkidle'});assert.equal(await p.locator('#listCount').innerText(),'4 笔记录');

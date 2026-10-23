@@ -25,11 +25,11 @@ public final class Ledger {
   public static final long MAX_CENTS = 99_999_999_999L;
   public static final String[] EXPENSE = {
     "餐饮", "零食", "饮品", "交通", "购物", "居住", "水电", "通讯", "数码", "服饰", "医疗", "娱乐", "学习", "人情", "旅行", "运动",
-    "宠物", "token", "其他"
+    "宠物", "token", "维修", "其他"
   };
   public static final String[] EXPENSE_EMOJI = {
     "🍚", "🍿", "🥤", "🚌", "🛒", "🏠", "💡", "📱", "💻", "👕", "💊", "🎮", "📚", "🎁", "✈️", "🏃",
-    "🐾", "🪙", "📦"
+    "🐾", "🪙", "🔧", "📦"
   };
   public static final String[] INCOME = {"工资", "奖金", "红包", "兼职", "理财", "报销", "其他"};
   public static final String[] INCOME_EMOJI = {"💰", "🏆", "🧧", "💼", "📈", "🧾", "📦"};

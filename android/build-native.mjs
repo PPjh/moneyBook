@@ -29,7 +29,7 @@ const minSdk = gradle.match(/minSdk\s+(\d+)/)[1];
 const targetSdk = gradle.match(/targetSdk\s+(\d+)/)[1];
 const versionCode = gradle.match(/versionCode\s+(\d+)/)[1];
 const versionName = gradle.match(/versionName\s+'([^']+)'/)[1];
-const webVersion = gradle.match(/WEB_BACKUP_VERSION[^\n]*'"([^']+)"'/)?.[1] || '1.5.8';
+const webVersion = gradle.match(/WEB_BACKUP_VERSION[^\n]*'"([^']+)"'/)?.[1] || '1.5.9';
 const executable = name => join(jdk, 'bin', name + (process.platform === 'win32' ? '.exe' : ''));
 const androidJar = join(sdk, 'platforms', `android-${compileSdk}`, 'android.jar');
 const toolVersions = readdirSync(join(sdk, 'build-tools')).filter(name => /^\d+\.\d+\.\d+$/.test(name))

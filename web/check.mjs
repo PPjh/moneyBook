@@ -728,7 +728,7 @@ if (app) {
   if (app4) {
     const e = app4.els, jz = app4.windowShim.__jz;
     const names = jz.CATS.expense.map((c) => c[0]);
-    ok(['零食', '饮品', 'token', '数码'].every((n) => names.includes(n)), '自定义添加的分类都在', names.join('/'));
+    ok(['零食', '饮品', 'token', '数码', '维修'].every((n) => names.includes(n)), '自定义添加的分类都在', names.join('/'));
     ok(jz.CATS.expense.every((c) => c.length === 2 && !!c[1]), '每个支出分类都有 emoji');
     ok(new Set(names).size === names.length, '分类名不重复');
     ok(names.indexOf('数码') > names.indexOf('通讯'), '数码排在通讯之后，位置合理');
@@ -736,10 +736,10 @@ if (app) {
     step('打开记账面板渲染分类宫格', () => e.get('fab').onclick());
     const grid = e.get('cats').innerHTML;
     eq((grid.match(/data-cat="/g) || []).length, jz.CATS.expense.length, '宫格渲染出全部分类（' + jz.CATS.expense.length + ' 个）');
-    for (const n of ['零食', '饮品', 'token', '数码']) {
+    for (const n of ['零食', '饮品', 'token', '数码', '维修']) {
       ok(grid.includes('data-cat="' + n + '"'), n + ' 出现在宫格');
     }
-    ok(/🍿/.test(grid) && /🥤/.test(grid) && /🪙/.test(grid) && /💻/.test(grid), '四个新分类都有图标');
+    ok(/🍿/.test(grid) && /🥤/.test(grid) && /🪙/.test(grid) && /💻/.test(grid) && /🔧/.test(grid), '新增分类都有图标');
 
     // 1000.00 − (123.45 + 5.00 + 20.00) = 851.55
     eq(e.get('meBalance').textContent, '¥851.55', '总结余 = 全部收入 − 全部支出');
@@ -753,6 +753,29 @@ if (app) {
       const list = e.get('listBox').innerHTML;
       ok(/零食/.test(list) && /饮品/.test(list) && /token/.test(list), '新分类正常显示');    });
   }
+
+  step('维修支出新增、筛选、编辑、统计与备份互导', () => {
+    const repair = runApp({ storageMode: 'ok', seed });
+    const e = repair.els, jz = repair.windowShim.__jz;
+    e.get('fab').onclick();
+    fire(e.get('cats'), 'click', {cat:'维修'});
+    e.get('amt').value = '188.50'; e.get('date').value = todayLocal(); e.get('note').value = '修水管';
+    e.get('sheetSave').onclick();
+    const record = recs(repair).find(r => r.cat === '维修');
+    eq(record && record.amount, 18850, '维修支出按分保存');
+    eq(recs(repair).length, 5, '新增维修不影响原账目');
+    ok(/🔧/.test(e.get('listBox').innerHTML), '维修明细使用扳手图标');
+    ok(/value="维修"/.test(e.get('categoryFilter').innerHTML), '维修出现在分类筛选');
+    e.get('categoryFilter').value = '维修'; e.get('categoryFilter').onchange();
+    eq((e.get('listBox').innerHTML.match(/class="rec"/g) || []).length, 1, '维修筛选只返回维修记录');
+    fire(e.get('listBox'), 'click', {id:record.id});
+    ok(/cat on" data-cat="维修"/.test(e.get('cats').innerHTML), '编辑维修时保持原分类');
+    e.get('amt').value = '200'; e.get('sheetSave').onclick();
+    ok(/维修/.test(e.get('rankBox').innerHTML) && /200\.00/.test(e.get('rankBox').innerHTML), '维修计入支出统计');
+    eq(jz.parseBackupText(JSON.stringify(jz.buildBackup())).records.find(r => r.id === record.id).cat, '维修', '备份恢复保留维修分类');
+    ok(/维修,200\.00/.test(jz.toCSV()), 'CSV 导出保留维修分类与金额');
+    ok(!jz.CATS.income.some(c => c[0] === '维修'), '收入分类不变');
+  });
 
   const seedNeg = {
     'jz.records.v1': JSON.stringify([

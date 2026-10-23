@@ -74,6 +74,28 @@ public class LedgerTest {
   }
 
   @Test
+  public void repairExpenseKeepsItsCategoryInFiltersTotalsAndBackup() throws Exception {
+    assertTrue(Arrays.asList(Ledger.EXPENSE).contains("维修"));
+    assertFalse(Arrays.asList(Ledger.INCOME).contains("维修"));
+    assertEquals(Ledger.EXPENSE.length, Ledger.EXPENSE_EMOJI.length);
+    assertEquals("🔧", Ledger.emoji("expense", "维修"));
+    Ledger.Entry repair =
+        new Ledger.Entry("repair", "expense", 18850, "维修", "修水管", "2026-10-23", 1);
+    List<Ledger.Entry> rows =
+        Arrays.asList(repair, entry("existing", "expense", 1250, "2026-10-23", "午饭"));
+    assertEquals(1, Ledger.filter(rows, "2026-10", false, "expense", "维修", "").size());
+    assertEquals(Long.valueOf(18850), Ledger.byCategory(rows).get("维修"));
+    Ledger.ImportData parsed =
+        Ledger.parse(
+            Ledger.backup(rows, Collections.emptyMap(), "light", new JSONObject()).toString());
+    assertEquals(2, parsed.entries.size());
+    assertEquals(
+        18850, Ledger.filter(parsed.entries, "2026-10", false, "all", "维修", "").get(0).amount);
+    assertEquals(
+        "existing", Ledger.filter(parsed.entries, "2026-10", false, "all", "餐饮", "").get(0).id);
+  }
+
+  @Test
   public void totalsDoNotConfuseIncomeAndExpense() {
     List<Ledger.Entry> rows =
         Arrays.asList(
@@ -196,7 +218,7 @@ public class LedgerTest {
 
   @Test
   public void categoriesMatchWeb() {
-    assertEquals(19, Ledger.EXPENSE.length);
+    assertEquals(20, Ledger.EXPENSE.length);
     assertEquals(7, Ledger.INCOME.length);
     assertEquals("🪙", Ledger.emoji("expense", "token"));
   }
