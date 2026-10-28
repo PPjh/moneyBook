@@ -963,6 +963,57 @@ if (app) {
   eq(b.els.get('loadMore').hidden, true, '加载全部后隐藏按钮');
 }
 
+/* 金额条件：单位元、整数分比较；无运算符时保持原关键词搜索。 */
+{
+  const rows = [
+    {id:'a',type:'expense',amount:1,cat:'维修',note:'',date:'2026-10-01'},
+    {id:'b',type:'expense',amount:9999,cat:'餐饮',note:'Coffee',date:'2026-10-02'},
+    {id:'c',type:'expense',amount:10000,cat:'维修',note:'保养',date:'2026-10-03'},
+    {id:'d',type:'expense',amount:10001,cat:'维修',note:'水管',date:'2026-10-04'},
+    {id:'e',type:'income',amount:20000,cat:'工资',note:'',date:'2026-10-05'},
+    {id:'f',type:'expense',amount:100000,cat:'维修',note:'',date:'2026-09-01'}
+  ];
+  const a=runApp({seed:{'jz.records.v1':JSON.stringify(rows),'jz.config.v1':JSON.stringify({autoExport:'off',snapOn:false})}}), e=a.els, jz=a.windowShim.__jz;
+  const cases = [
+    ['>100','d,e,f'],['>=100','c,d,e,f'],['<100','a,b'],['<=100','a,b,c'],['=100','c'],
+    ['≥100.01','d,e,f'],['≤0.01','a'],['大于100','d,e,f'],['小于100','a,b'],
+    ['大于等于100','c,d,e,f'],['小于等于100','a,b,c'],['至少100','c,d,e,f'],['至多100','a,b,c'],
+    ['不低于100','c,d,e,f'],['不高于100','a,b,c'],['> ¥100 元','d,e,f'],['>￥1,000.00',''],
+    ['>999.99','f'],['>.01','b,c,d,e,f'],['>100.01','e,f'],['<0.01',''],['>0','a,b,c,d,e,f'],
+    ['>=100 <200','c,d'],['维修 >100','d,f'],['维修 >=100 <200','c,d'],['>100 维修','d,f'],
+    ['100.00','c'],['COFFEE','b'],['水管 >100','d'],['收入 >100','e'],['支出 >100','d,f']
+  ];
+  for(const [text,ids] of cases){
+    const search=jz.parseSearchQuery(text);
+    eq(search.error,'','合法金额查询：'+text);
+    eq(rows.filter(r=>jz.matchesSearch(r,search)).map(r=>r.id).sort().join(','),ids,'金额条件正确命中：'+text);
+  }
+  for(const text of ['>','>=','>-1','>1.001','>1,00','>Infinity','>NaN','>1e2','>100abc','>1000000000','>>100','>=100 <','=100 <200foo','>１００']){
+    const search=jz.parseSearchQuery(text);
+    ok(!!search.error,'无效条件给出提示：'+text);
+    eq(rows.filter(r=>jz.matchesSearch(r,search)).length,0,'无效条件不误返回全部账目：'+text);
+  }
+  const max={...rows[0],amount:99999999999};
+  eq(jz.matchesSearch(max,jz.parseSearchQuery('=999999999.99')),true,'最大金额精确到分');
+  eq(jz.matchesSearch(max,jz.parseSearchQuery('>999999999.99')),false,'严格大于不包括等值最大金额');
+  e.get('monthPicker').value='2026-10';e.get('monthPicker').onchange();
+  e.get('searchInput').value='>100';fireInput(e.get('searchInput'));
+  eq(e.get('listCount').textContent,'2 笔记录','金额查询默认只查所选月份');
+  ok(/条件：“>100”/.test(e.get('filterInfo').textContent),'收起后仍显示金额条件');
+  ok(/300\.01/.test(e.get('sumExp').innerHTML),'金额条件不改变月度总支出');
+  e.get('allMonths').checked=true;e.get('allMonths').onchange();
+  eq(e.get('listCount').textContent,'3 笔记录','金额条件可跨月');
+  fire(e.get('listSeg'),'click',{filter:'expense'});
+  eq(e.get('listCount').textContent,'2 笔记录','金额条件可与支出标签组合');
+  e.get('categoryFilter').value='维修';e.get('categoryFilter').onchange();
+  eq(e.get('listCount').textContent,'2 笔记录','金额条件可与分类组合');
+  e.get('searchInput').value='>100.001';fireInput(e.get('searchInput'));
+  ok(/格式有误/.test(e.get('filterInfo').textContent),'错误的小数条件显示说明');
+  eq(e.get('listCount').textContent,'0 笔记录','错误条件不进行舍入匹配');
+  e.get('clearSearch').onclick();
+  eq(e.get('listCount').textContent,'4 笔记录','清除金额条件保留类型与分类筛选');
+}
+
 /* =========== 15. 月份预算与主题 =========== */
 {
   const a = runApp(), e = a.els;

@@ -14,6 +14,9 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.LongPredicate;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -206,6 +209,66 @@ public final class Ledger {
     }
   }
 
+  private static final class SearchQuery {
+    private static final String OPERATORS = ">=|<=|>|<|=|≥|≤|大于等于|小于等于|不低于|不高于|至少|至多|大于|小于|等于";
+    private static final Pattern CONDITION =
+        Pattern.compile(
+            "(^|\\s)("
+                + OPERATORS
+                + ")\\s*[¥￥]?\\s*"
+                + "((?:[0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)(?:\\.[0-9]{0,2})?|\\.[0-9]{1,2})"
+                + "(?:\\s*元)?(?=\\s|$)");
+    private static final Pattern INVALID =
+        Pattern.compile("(^|\\s)(" + OPERATORS + ")");
+    private final List<LongPredicate> conditions = new ArrayList<>();
+    private final String keyword;
+    private boolean valid = true;
+
+    SearchQuery(String text) {
+      Matcher matcher = CONDITION.matcher(text == null ? "" : text);
+      StringBuffer remaining = new StringBuffer();
+      while (matcher.find()) {
+        try {
+          long cents =
+              new BigDecimal(matcher.group(3).replace(",", "")).movePointRight(2).longValueExact();
+          if (cents > MAX_CENTS) valid = false;
+          LongPredicate condition =
+              switch (matcher.group(2)) {
+                case ">", "大于" -> amount -> amount > cents;
+                case ">=", "≥", "大于等于", "不低于", "至少" -> amount -> amount >= cents;
+                case "<", "小于" -> amount -> amount < cents;
+                case "<=", "≤", "小于等于", "不高于", "至多" -> amount -> amount <= cents;
+                default -> amount -> amount == cents;
+              };
+          conditions.add(condition);
+        } catch (ArithmeticException error) {
+          valid = false;
+        }
+        matcher.appendReplacement(remaining, Matcher.quoteReplacement(matcher.group(1)));
+      }
+      matcher.appendTail(remaining);
+      keyword = remaining.toString().trim().toLowerCase(Locale.ROOT);
+      if (INVALID.matcher(keyword).find()) valid = false;
+    }
+
+    boolean matches(Entry r) {
+      if (!valid) return false;
+      for (LongPredicate condition : conditions) if (!condition.test(r.amount)) return false;
+      return keyword.isEmpty()
+          || (r.category
+                  + " "
+                  + r.note
+                  + " "
+                  + r.date
+                  + " "
+                  + money(r.amount)
+                  + " "
+                  + (r.income() ? "收入" : "支出"))
+              .toLowerCase(Locale.ROOT)
+              .contains(keyword);
+    }
+  }
+
   public static List<Entry> filter(
       List<Entry> records,
       String month,
@@ -214,15 +277,12 @@ public final class Ledger {
       String category,
       String search) {
     List<Entry> out = new ArrayList<>();
-    String query = search == null ? "" : search.trim().toLowerCase(Locale.ROOT);
+    SearchQuery query = new SearchQuery(search);
     for (Entry r : records) {
       if (!allMonths && !r.date.startsWith(month)) continue;
       if (!"all".equals(type) && !r.type.equals(type)) continue;
       if (!"全部分类".equals(category) && !r.category.equals(category)) continue;
-      if (!query.isEmpty()
-          && !(r.category + " " + r.note + " " + r.date + " " + money(r.amount))
-              .toLowerCase(Locale.ROOT)
-              .contains(query)) continue;
+      if (!query.matches(r)) continue;
       out.add(r);
     }
     out.sort(

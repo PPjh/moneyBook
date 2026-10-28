@@ -196,6 +196,42 @@ try {
     }
   }
   results.push('search popup: hidden by default, focus, live filtering, active marker, Enter/Escape/outside/Tab/view-change dismissal, query preservation, clear and native back');
+  const amountRows=[
+    {id:'low',type:'expense',amount:9999,cat:'维修',note:'灯具',date:month+'-01',ts:1},
+    {id:'equal',type:'expense',amount:10000,cat:'维修',note:'家电',date:month+'-02',ts:2},
+    {id:'high',type:'expense',amount:10001,cat:'维修',note:'水管',date:month+'-03',ts:3},
+    {id:'income',type:'income',amount:20000,cat:'工资',note:'',date:month+'-04',ts:4},
+    {id:'old',type:'expense',amount:50000,cat:'维修',note:'历史',date:'2025-01-01',ts:5}
+  ];
+  for(const isNative of [false,true]){
+    const test=await context(isNative,null,{rows:amountRows}), page=test.page;
+    await page.locator('#toggleSearch').click();
+    assert.match(await page.locator('#searchHelp').innerText(),/>100/,'amount syntax is explained where users search');
+    for(const [query,count] of [['>100',2],['>=100',3],['<100',1],['<=100',2],['=100',1],['大于100',2],['维修 >100',1],['>=100 <200',2],['>100.01',1]]){
+      await page.locator('#searchInput').fill(query);
+      assert.equal(await page.locator('#listCount').innerText(),count+' 笔记录','amount comparison '+query);
+      assert.equal(await page.locator('#sumExp').innerText(),'¥300.00','monthly summary stays unfiltered');
+    }
+    await page.locator('#searchInput').fill('>100.001');
+    assert.equal(await page.locator('#listCount').innerText(),'0 笔记录');
+    assert.match(await page.locator('#filterInfo').innerText(),/格式有误/,'malformed conditions show an inline error, never unfiltered results');
+    await page.locator('#searchInput').fill('>100');
+    await page.keyboard.press('Enter');
+    assert.equal(await page.locator('#searchPopover').isVisible(),false);
+    assert.match(await page.locator('#filterInfo').innerText(),/条件：“>100”/,'collapsed search retains visible conditions');
+    await page.locator('#allMonths').check();
+    assert.equal(await page.locator('#listCount').innerText(),'3 笔记录','amount searches can include older months');
+    await page.locator('#listSeg button[data-filter="expense"]').click();
+    await page.locator('#categoryFilter').selectOption('维修');
+    assert.equal(await page.locator('#listCount').innerText(),'2 笔记录','amount, month, type and category filters compose');
+    await page.locator('#toggleSearch').click();
+    if(isNative)await page.screenshot({path:join(output,version+'-amount-search.png')});
+    await page.locator('#clearSearch').click();
+    assert.equal(await page.locator('#listCount').innerText(),'4 笔记录','clearing amount keeps other filters');
+    assert.equal(await page.evaluate(()=>window.__jz.buildBackup().records.length),5,'search never changes ledger data');
+    await test.ctx.close();
+  }
+  results.push('amount conditions: >/>=/</<=/=, Chinese aliases, exact-cent boundaries, combined keywords/ranges/type/category/month, invalid input errors, clear and collapsed markers; Web/native unchanged data and monthly totals');
   for(const x of [web,native]) {
     const page=x.page;
     await page.locator('#fab').click();

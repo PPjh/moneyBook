@@ -96,6 +96,103 @@ public class LedgerTest {
   }
 
   @Test
+  public void amountComparisonsMatchExactCentBoundariesAndKeywords() {
+    List<Ledger.Entry> rows = amountSearchRows();
+    String[][] cases = {
+      {">100", "d,e,f"},
+      {">=100", "c,d,e,f"},
+      {"<100", "a,b"},
+      {"<=100", "a,b,c"},
+      {"=100", "c"},
+      {"≥100.01", "d,e,f"},
+      {"≤0.01", "a"},
+      {"大于100", "d,e,f"},
+      {"小于100", "a,b"},
+      {"大于等于100", "c,d,e,f"},
+      {"小于等于100", "a,b,c"},
+      {"至少100", "c,d,e,f"},
+      {"至多100", "a,b,c"},
+      {"不低于100", "c,d,e,f"},
+      {"不高于100", "a,b,c"},
+      {"> ¥100 元", "d,e,f"},
+      {">￥1,000.00", ""},
+      {">999.99", "f"},
+      {">.01", "b,c,d,e,f"},
+      {">100.01", "e,f"},
+      {"<0.01", ""},
+      {">0", "a,b,c,d,e,f"},
+      {">=100 <200", "c,d"},
+      {"维修 >100", "d,f"},
+      {"维修 >=100 <200", "c,d"},
+      {">100 维修", "d,f"},
+      {"100.00", "c"},
+      {"COFFEE", "b"},
+      {"水管 >100", "d"},
+      {"收入 >100", "e"},
+      {"支出 >100", "d,f"}
+    };
+    for (String[] item : cases) {
+      String ids =
+          String.join(
+              ",",
+              Ledger.filter(rows, "2026-10", true, "all", "全部分类", item[0]).stream()
+                  .map(r -> r.id)
+                  .sorted()
+                  .toArray(String[]::new));
+      assertEquals(item[0], item[1], ids);
+    }
+  }
+
+  @Test
+  public void amountSearchCombinesWithMonthTypeCategoryAndMaximum() {
+    List<Ledger.Entry> rows = amountSearchRows();
+    assertEquals(2, Ledger.filter(rows, "2026-10", false, "all", "全部分类", ">100").size());
+    assertEquals(1, Ledger.filter(rows, "2026-10", false, "expense", "全部分类", ">100").size());
+    assertEquals(1, Ledger.filter(rows, "2026-10", false, "all", "维修", ">100").size());
+    assertEquals("d", Ledger.filter(rows, "2026-10", false, "all", "维修", ">100").get(0).id);
+    List<Ledger.Entry> maximum =
+        Collections.singletonList(
+            new Ledger.Entry("max", "expense", Ledger.MAX_CENTS, "维修", "", "2026-10-28", 1));
+    assertEquals(
+        1, Ledger.filter(maximum, "2026-10", false, "all", "全部分类", "=999999999.99").size());
+    assertEquals(
+        0, Ledger.filter(maximum, "2026-10", false, "all", "全部分类", ">999999999.99").size());
+  }
+
+  @Test
+  public void malformedAmountConditionsNeverExpandResults() {
+    for (String text :
+        Arrays.asList(
+            ">",
+            ">=",
+            ">-1",
+            ">1.001",
+            ">1,00",
+            ">Infinity",
+            ">NaN",
+            ">1e2",
+            ">100abc",
+            ">1000000000",
+            ">>100",
+            ">=100 <",
+            "=100 <200foo",
+            ">１００")) {
+      assertTrue(
+          text, Ledger.filter(amountSearchRows(), "2026-10", true, "all", "全部分类", text).isEmpty());
+    }
+  }
+
+  private List<Ledger.Entry> amountSearchRows() {
+    return Arrays.asList(
+        new Ledger.Entry("a", "expense", 1, "维修", "", "2026-10-01", 1),
+        new Ledger.Entry("b", "expense", 9999, "餐饮", "Coffee", "2026-10-02", 2),
+        new Ledger.Entry("c", "expense", 10000, "维修", "保养", "2026-10-03", 3),
+        new Ledger.Entry("d", "expense", 10001, "维修", "水管", "2026-10-04", 4),
+        new Ledger.Entry("e", "income", 20000, "工资", "", "2026-10-05", 5),
+        new Ledger.Entry("f", "expense", 100000, "维修", "", "2026-09-01", 6));
+  }
+
+  @Test
   public void totalsDoNotConfuseIncomeAndExpense() {
     List<Ledger.Entry> rows =
         Arrays.asList(

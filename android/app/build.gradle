@@ -7,9 +7,9 @@ android {
         applicationId 'io.github.ppjh.moneybook'
         minSdk 26
         targetSdk 35
-        versionCode 8
-        versionName '1.2.2'
-        buildConfigField 'String', 'WEB_BACKUP_VERSION', '"1.5.9"'
+        versionCode 9
+        versionName '1.2.3'
+        buildConfigField 'String', 'WEB_BACKUP_VERSION', '"1.5.10"'
     }
     buildFeatures { buildConfig true }
     sourceSets.main.assets.srcDir layout.buildDirectory.dir('generated/sharedUiAssets')

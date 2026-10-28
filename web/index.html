@@ -321,6 +321,7 @@ body[data-view="stats"] .fab,body[data-view="me"] .fab{display:none}
 .search-popover input{font-size:16px;flex:1;min-height:40px}
 .search-popover button{min-height:40px;padding:0 6px}
 .search-popover .search-close{width:34px;flex:0 0 34px;padding:0;font-size:21px;color:var(--muted)}
+.search-help{font-size:11px;color:var(--muted);line-height:1.6;margin:5px 4px 0;overflow-wrap:anywhere}
 #searchInput::-webkit-search-cancel-button{display:none}
 .list-tools{margin-top:22px;display:grid;gap:10px}
 .filters{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
@@ -490,7 +491,8 @@ body[data-view="stats"] .fab,body[data-view="me"] .fab{display:none}
         <div class="list-title"><h2>收支明细</h2><button class="search-toggle" id="toggleSearch" type="button" aria-label="搜索账目" title="搜索账目" aria-expanded="false" aria-controls="searchPopover"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></svg></button></div>
         <span id="listCount">0 笔记录</span>
         <div class="search-popover" id="searchPopover" role="search" aria-label="账目搜索" hidden>
-          <div class="searchbox"><input id="searchInput" type="search" enterkeyhint="search" placeholder="搜索备注、分类或金额" aria-label="搜索账目" autocomplete="off" maxlength="80"><button id="clearSearch" type="button" hidden>清除</button><button class="search-close" id="closeSearch" type="button" aria-label="收起搜索" title="收起搜索">×</button></div>
+          <div class="searchbox"><input id="searchInput" type="search" enterkeyhint="search" placeholder="关键词或金额，如 >100" aria-label="搜索账目" aria-describedby="searchHelp" autocomplete="off" maxlength="80"><button id="clearSearch" type="button" hidden>清除</button><button class="search-close" id="closeSearch" type="button" aria-label="收起搜索" title="收起搜索">×</button></div>
+          <p class="search-help" id="searchHelp">金额按元：&gt;100、&gt;=100、&lt;100；可组合，如 维修 &gt;100 或 &gt;=100 &lt;500</p>
         </div>
       </div>
       <div class="filter-info" id="filterInfo" hidden></div>
@@ -731,7 +733,7 @@ var PALETTE = ['#ed8a2d','#f4bb46','#d56545','#996fca','#6f9b69','#d88aaa','#72a
 var WEEK = ['日','一','二','三','四','五','六'];
 var TYPE_NAME = { expense:'支出', income:'收入' };
 /* 发布时同步此版本与 sw.js 缓存版本；界面和备份从此读取。 */
-var APP_VERSION = '1.5.9';
+var APP_VERSION = '1.5.10';
 var MAX_CENTS = 99999999999;
 
 function $(id){ return document.getElementById(id); }
@@ -979,13 +981,35 @@ function setBudget(value){
 }
 
 /* ===================== 搜索与筛选 ===================== */
+function parseSearchQuery(text){
+  var conditions = [], error = '';
+  var operators = {'≥':'>=','≤':'<=','大于等于':'>=','小于等于':'<=','不低于':'>=','不高于':'<=','至少':'>=','至多':'<=','大于':'>','小于':'<','等于':'='};
+  var keyword = String(text || '').replace(/(^|\s)(>=|<=|>|<|=|≥|≤|大于等于|小于等于|不低于|不高于|至少|至多|大于|小于|等于)\s*[¥￥]?\s*((?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d{0,2})?|\.\d{1,2})(?:\s*元)?(?=\s|$)/g, function(all, space, op, amount){
+    var parts = amount.replace(/,/g, '').split('.');
+    var cents = Number(parts[0] || 0) * 100 + Number(((parts[1] || '') + '00').slice(0, 2));
+    if(!Number.isSafeInteger(cents) || cents > MAX_CENTS) error = '金额条件超出上限';
+    conditions.push({op:operators[op] || op, cents:cents});
+    return space;
+  }).trim().toLocaleLowerCase();
+  if(/(^|\s)(>=|<=|>|<|=|≥|≤|大于等于|小于等于|不低于|不高于|至少|至多|大于|小于|等于)/.test(keyword)) error = '金额条件格式有误，请用 >100 或 >=100 <500，最多两位小数';
+  return {keyword:keyword, conditions:conditions, error:error};
+}
+function matchesSearch(r, search){
+  if(search.error) return false;
+  for(var i=0;i<search.conditions.length;i++){
+    var c = search.conditions[i], amount = r.amount;
+    if(c.op === '>' ? amount <= c.cents : c.op === '>=' ? amount < c.cents : c.op === '<' ? amount >= c.cents : c.op === '<=' ? amount > c.cents : amount !== c.cents) return false;
+  }
+  var q = search.keyword;
+  return !q || (r.note + ' ' + r.cat + ' ' + r.date + ' ' + (r.amount/100).toFixed(2) + ' ' + TYPE_NAME[r.type]).toLocaleLowerCase().indexOf(q) >= 0;
+}
 function filteredRecords(){
-  var q = state.query.trim().toLocaleLowerCase();
+  var search = parseSearchQuery(state.query);
   return records.filter(function(r){
     if(!state.allMonths && ymOf(r.date) !== state.month) return false;
     if(state.listType !== 'all' && r.type !== state.listType) return false;
     if(state.category && r.cat !== state.category) return false;
-    return !q || (r.note + ' ' + r.cat + ' ' + r.date + ' ' + (r.amount/100).toFixed(2) + ' ' + TYPE_NAME[r.type]).toLocaleLowerCase().indexOf(q) >= 0;
+    return matchesSearch(r, search);
   });
 }
 function renderCategoryFilter(){
@@ -1025,7 +1049,8 @@ function renderList(){
   $('listCount').textContent = list.length + ' 笔记录';
   var filtering = state.query.trim() || state.listType !== 'all' || state.category || state.allMonths;
   $('filterInfo').hidden = !filtering;
-  $('filterInfo').textContent = (state.allMonths ? '全部月份' : monthLabel(ym)) + (state.query.trim() ? ' · 关键词：“' + state.query.trim() + '”' : '') + ' · 筛选结果：支出 ¥' + yuan(sumCents(list.filter(function(r){ return r.type === 'expense'; }))) + ' / 收入 ¥' + yuan(sumCents(list.filter(function(r){ return r.type === 'income'; })));
+  var search = parseSearchQuery(state.query);
+  $('filterInfo').textContent = (state.allMonths ? '全部月份' : monthLabel(ym)) + (state.query.trim() ? (search.conditions.length || search.error ? ' · 条件：“' : ' · 关键词：“') + state.query.trim() + '”' : '') + (search.error ? ' · ' + search.error : '') + ' · 筛选结果：支出 ¥' + yuan(sumCents(list.filter(function(r){ return r.type === 'expense'; }))) + ' / 收入 ¥' + yuan(sumCents(list.filter(function(r){ return r.type === 'income'; })));
   $('clearSearch').hidden = !state.query;
   $('toggleSearch').classList.toggle('has-query', !!state.query.trim());
   $('toggleSearch').setAttribute('aria-label', state.query.trim() ? '搜索账目（已筛选）' : '搜索账目');
@@ -2207,7 +2232,7 @@ window.__jz = { toCents:toCents, yuan:yuan, shiftMonth:shiftMonth, monthLabel:mo
                 aggregate:aggregate, sumCents:sumCents, pinHash:pinHash, ymd:ymd, daysInMonth:daysInMonth,
                 buildBackup:buildBackup, toCSV:toCSV, parseBackupText:parseBackupText,
                 normalizeRows:normalizeRows, snapshot:snapshot, loadBackups:loadBackups,
-                showUpdateBar:showUpdateBar, CATS:CATS,
+                showUpdateBar:showUpdateBar, CATS:CATS, parseSearchQuery:parseSearchQuery, matchesSearch:matchesSearch,
                 evalAmount:evalAmount, amountCents:amountCents, hasOperator:hasOperator };
 
 if(platform){
