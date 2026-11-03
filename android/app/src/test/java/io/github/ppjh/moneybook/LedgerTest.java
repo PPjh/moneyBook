@@ -315,9 +315,77 @@ public class LedgerTest {
 
   @Test
   public void categoriesMatchWeb() {
-    assertEquals(20, Ledger.EXPENSE.length);
+    assertEquals(19, Ledger.EXPENSE.length);
     assertEquals(7, Ledger.INCOME.length);
+    assertEquals(Ledger.EXPENSE.length, Ledger.EXPENSE_EMOJI.length);
+    assertTrue(Arrays.asList(Ledger.EXPENSE).contains("理财"));
+    assertFalse(Arrays.asList(Ledger.EXPENSE).contains("水电"));
+    assertFalse(Arrays.asList(Ledger.EXPENSE).contains("宠物"));
+    assertTrue(Arrays.asList(Ledger.INCOME).contains("理财"));
+    assertEquals("📈", Ledger.emoji("expense", "理财"));
+    assertEquals("📈", Ledger.emoji("income", "理财"));
+    assertEquals("理财", Ledger.EXPENSE[Arrays.asList(Ledger.EXPENSE).indexOf("token") - 1]);
     assertEquals("🪙", Ledger.emoji("expense", "token"));
+  }
+
+  @Test
+  public void financeExpenseAndIncomeRemainSeparateInTotalsAndBackup() throws Exception {
+    List<Ledger.Entry> rows =
+        Arrays.asList(
+            new Ledger.Entry("investment", "expense", 100000, "理财", "投入", "2026-11-03", 1),
+            new Ledger.Entry("return", "income", 3000, "理财", "收益", "2026-11-03", 2));
+    assertEquals(100000, Ledger.total(rows, false));
+    assertEquals(3000, Ledger.total(rows, true));
+    assertEquals(Long.valueOf(100000), Ledger.byCategory(rows).get("理财"));
+    assertEquals(1, Ledger.filter(rows, "2026-11", false, "expense", "理财", "").size());
+    assertEquals(1, Ledger.filter(rows, "2026-11", false, "income", "理财", "").size());
+    Ledger.ImportData restored =
+        Ledger.parse(
+            Ledger.backup(rows, Collections.emptyMap(), "light", new JSONObject()).toString());
+    assertEquals(2, restored.entries.size());
+    assertEquals(
+        "investment",
+        Ledger.filter(restored.entries, "2026-11", false, "expense", "理财", "").get(0).id);
+    assertEquals(
+        "return", Ledger.filter(restored.entries, "2026-11", false, "income", "理财", "").get(0).id);
+  }
+
+  @Test
+  public void retiredExpenseCategoriesRemainEditableFilterableAndRestorable() throws Exception {
+    Ledger.ImportData original =
+        Ledger.parse(
+            "[{\"id\":\"old-water\",\"type\":\"expense\",\"amount\":1234,\"cat\":\"水电\",\"note\":\"旧记录\",\"date\":\"2026-10-18\",\"ts\":1},"
+                + "{\"id\":\"old-pet\",\"type\":\"expense\",\"amount\":5678,\"cat\":\"宠物\",\"note\":\"旧记录\",\"date\":\"2026-10-19\",\"ts\":2}]");
+    assertEquals(2, original.entries.size());
+    assertEquals(0, original.skipped);
+    Ledger.Entry water =
+        Ledger.filter(original.entries, "2026-10", false, "expense", "水电", "").get(0);
+    Ledger.Entry pet =
+        Ledger.filter(original.entries, "2026-10", false, "expense", "宠物", "").get(0);
+    assertEquals("old-water", water.id);
+    assertEquals("old-pet", pet.id);
+    assertEquals(Long.valueOf(1234), Ledger.byCategory(original.entries).get("水电"));
+    assertEquals(Long.valueOf(5678), Ledger.byCategory(original.entries).get("宠物"));
+    Ledger.Entry edited =
+        new Ledger.Entry(
+            water.id, water.type, 1500, water.category, "更新备注", water.date, water.timestamp);
+    assertEquals("水电", edited.json().getString("cat"));
+    Ledger.ImportData restored =
+        Ledger.parse(
+            Ledger.backup(
+                    Arrays.asList(edited, pet), Collections.emptyMap(), "light", new JSONObject())
+                .toString());
+    assertEquals(2, restored.entries.size());
+    Ledger.Entry restoredWater =
+        Ledger.filter(restored.entries, "2026-10", false, "expense", "水电", "").get(0);
+    Ledger.Entry restoredPet =
+        Ledger.filter(restored.entries, "2026-10", false, "expense", "宠物", "").get(0);
+    assertEquals("old-water", restoredWater.id);
+    assertEquals(1500, restoredWater.amount);
+    assertEquals("更新备注", restoredWater.note);
+    assertEquals("old-pet", restoredPet.id);
+    assertEquals(5678, restoredPet.amount);
+    assertEquals(1234, water.amount);
   }
 
   @Test

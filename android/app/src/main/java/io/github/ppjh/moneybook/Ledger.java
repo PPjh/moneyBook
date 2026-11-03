@@ -27,12 +27,12 @@ public final class Ledger {
 
   public static final long MAX_CENTS = 99_999_999_999L;
   public static final String[] EXPENSE = {
-    "餐饮", "零食", "饮品", "交通", "购物", "居住", "水电", "通讯", "数码", "服饰", "医疗", "娱乐", "学习", "人情", "旅行", "运动",
-    "宠物", "token", "维修", "其他"
+    "餐饮", "零食", "饮品", "交通", "购物", "居住", "通讯", "数码", "服饰", "医疗", "娱乐", "学习", "人情", "旅行", "运动", "理财",
+    "token", "维修", "其他"
   };
   public static final String[] EXPENSE_EMOJI = {
-    "🍚", "🍿", "🥤", "🚌", "🛒", "🏠", "💡", "📱", "💻", "👕", "💊", "🎮", "📚", "🎁", "✈️", "🏃",
-    "🐾", "🪙", "🔧", "📦"
+    "🍚", "🍿", "🥤", "🚌", "🛒", "🏠", "📱", "💻", "👕", "💊", "🎮", "📚", "🎁", "✈️", "🏃", "📈",
+    "🪙", "🔧", "📦"
   };
   public static final String[] INCOME = {"工资", "奖金", "红包", "兼职", "理财", "报销", "其他"};
   public static final String[] INCOME_EMOJI = {"💰", "🏆", "🧧", "💼", "📈", "🧾", "📦"};
@@ -218,8 +218,7 @@ public final class Ledger {
                 + ")\\s*[¥￥]?\\s*"
                 + "((?:[0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)(?:\\.[0-9]{0,2})?|\\.[0-9]{1,2})"
                 + "(?:\\s*元)?(?=\\s|$)");
-    private static final Pattern INVALID =
-        Pattern.compile("(^|\\s)(" + OPERATORS + ")");
+    private static final Pattern INVALID = Pattern.compile("(^|\\s)(" + OPERATORS + ")");
     private final List<LongPredicate> conditions = new ArrayList<>();
     private final String keyword;
     private boolean valid = true;

@@ -723,9 +723,9 @@ function saveJSON(key, val){
 /* ===================== 常量 / 工具 ===================== */
 var CATS = {
   expense: [['餐饮','🍚'],['零食','🍿'],['饮品','🥤'],['交通','🚌'],['购物','🛒'],
-            ['居住','🏠'],['水电','💡'],['通讯','📱'],['数码','💻'],['服饰','👕'],
+            ['居住','🏠'],['通讯','📱'],['数码','💻'],['服饰','👕'],
             ['医疗','💊'],['娱乐','🎮'],['学习','📚'],['人情','🎁'],['旅行','✈️'],
-            ['运动','🏃'],['宠物','🐾'],['token','🪙'],['维修','🔧'],['其他','📦']],
+            ['运动','🏃'],['理财','📈'],['token','🪙'],['维修','🔧'],['其他','📦']],
   income:  [['工资','💰'],['奖金','🏆'],['红包','🧧'],['兼职','💼'],['理财','📈'],['报销','🧾'],['其他','📦']]
 };
 var PALETTE = ['#ed8a2d','#f4bb46','#d56545','#996fca','#6f9b69','#d88aaa','#72a6c5',
@@ -733,7 +733,7 @@ var PALETTE = ['#ed8a2d','#f4bb46','#d56545','#996fca','#6f9b69','#d88aaa','#72a
 var WEEK = ['日','一','二','三','四','五','六'];
 var TYPE_NAME = { expense:'支出', income:'收入' };
 /* 发布时同步此版本与 sw.js 缓存版本；界面和备份从此读取。 */
-var APP_VERSION = '1.5.10';
+var APP_VERSION = '1.5.11';
 var MAX_CENTS = 99999999999;
 
 function $(id){ return document.getElementById(id); }
@@ -1673,11 +1673,15 @@ function buildCats(){
   $('cats').innerHTML = html;
 }
 
+function defaultEntryCategory(type){
+  var preferred = cfg.lastCat[type];
+  return CATS[type].some(function(c){ return c[0] === preferred; }) ? preferred : CATS[type][0][0];
+}
 function openEntry(rec){
   state.editing = rec || null;
   state.entryType = rec ? rec.type : 'expense';
   document.querySelectorAll('#typeSeg button').forEach(function(b){ b.classList.toggle('on', b.dataset.type === state.entryType); });
-  state.entryCat = rec ? rec.cat : (cfg.lastCat[state.entryType] || CATS[state.entryType][0][0]);
+  state.entryCat = rec ? rec.cat : defaultEntryCategory(state.entryType);
   $('amt').value = rec ? (rec.amount/100).toFixed(2) : '';
   $('date').value = rec ? rec.date : todayStr();
   $('note').value = rec ? (rec.note || '') : '';
@@ -1687,7 +1691,11 @@ function openEntry(rec){
   buildCats();
   updateCalc();
   showModal('sheet');
-  setTimeout(function(){ if($('sheet').classList.contains('show')) $('amt').focus(); }, 280);
+  setTimeout(function(){
+    var active = document.activeElement;
+    // Do not steal focus if the user has already chosen a field or control in the sheet.
+    if($('sheet').classList.contains('show') && (!active || !active.closest('#sheet'))) $('amt').focus();
+  }, 280);
 }
 /* 算式实时预览：输入里出现运算符时，在旁边显示 =结果 */
 function updateCalc(){
@@ -1971,13 +1979,22 @@ $('sheetCancel').onclick = closeEntry;
 $('sheetSave').onclick = function(){ saveEntry(false); };
 $('saveContinue').onclick = function(){ saveEntry(true); };
 $('sheetDelete').onclick = deleteEntry;
+function keepAmountFocus(e){
+  if(document.activeElement !== $('amt') || e.isPrimary === false || (e.button !== undefined && e.button !== 0)) return;
+  // Stop the press from transferring focus; leave click selection and touch scrolling intact.
+  if(e.target.closest('button[data-type],button[data-cat]') && e.cancelable) e.preventDefault();
+}
+var entryPressEvent = window.PointerEvent ? 'pointerdown' : 'mousedown';
+$('typeSeg').addEventListener(entryPressEvent, keepAmountFocus);
+$('cats').addEventListener(entryPressEvent, keepAmountFocus);
 $('typeSeg').addEventListener('click', function(e){
   var b = e.target.closest('button[data-type]'); if(!b) return;
+  if(b.dataset.type === state.entryType) return;
   state.entryType = b.dataset.type;
   document.querySelectorAll('#typeSeg button').forEach(function(x){ x.classList.toggle('on', x === b); });
   var keep = state.entryCat;
   var names = CATS[state.entryType].map(function(c){ return c[0]; });
-  state.entryCat = (names.indexOf(keep) >= 0) ? keep : (cfg.lastCat[state.entryType] || names[0]);
+  state.entryCat = (names.indexOf(keep) >= 0) ? keep : defaultEntryCategory(state.entryType);
   buildCats();
 });
 $('cats').addEventListener('click', function(e){

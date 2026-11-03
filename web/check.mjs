@@ -728,7 +728,9 @@ if (app) {
   if (app4) {
     const e = app4.els, jz = app4.windowShim.__jz;
     const names = jz.CATS.expense.map((c) => c[0]);
-    ok(['零食', '饮品', 'token', '数码', '维修'].every((n) => names.includes(n)), '自定义添加的分类都在', names.join('/'));
+    ok(['零食', '饮品', 'token', '数码', '维修', '理财'].every((n) => names.includes(n)), '自定义添加的分类都在', names.join('/'));
+    ok(!names.includes('水电') && !names.includes('宠物'), '新建支出不提供水电与宠物分类');
+    eq(names.length,19,'支出分类共 19 类');
     ok(jz.CATS.expense.every((c) => c.length === 2 && !!c[1]), '每个支出分类都有 emoji');
     ok(new Set(names).size === names.length, '分类名不重复');
     ok(names.indexOf('数码') > names.indexOf('通讯'), '数码排在通讯之后，位置合理');
@@ -736,7 +738,7 @@ if (app) {
     step('打开记账面板渲染分类宫格', () => e.get('fab').onclick());
     const grid = e.get('cats').innerHTML;
     eq((grid.match(/data-cat="/g) || []).length, jz.CATS.expense.length, '宫格渲染出全部分类（' + jz.CATS.expense.length + ' 个）');
-    for (const n of ['零食', '饮品', 'token', '数码', '维修']) {
+    for (const n of ['零食', '饮品', 'token', '数码', '维修', '理财']) {
       ok(grid.includes('data-cat="' + n + '"'), n + ' 出现在宫格');
     }
     ok(/🍿/.test(grid) && /🥤/.test(grid) && /🪙/.test(grid) && /💻/.test(grid) && /🔧/.test(grid), '新增分类都有图标');
@@ -775,6 +777,44 @@ if (app) {
     eq(jz.parseBackupText(JSON.stringify(jz.buildBackup())).records.find(r => r.id === record.id).cat, '维修', '备份恢复保留维修分类');
     ok(/维修,200\.00/.test(jz.toCSV()), 'CSV 导出保留维修分类与金额');
     ok(!jz.CATS.income.some(c => c[0] === '维修'), '收入分类不变');
+  });
+
+  for(const legacyCat of ['水电','宠物']){
+    const legacyRows=[{id:'old-category',type:'expense',amount:1234,cat:legacyCat,note:'原记录',date:todayLocal()}];
+    const a=runApp({seed:{'jz.records.v1':JSON.stringify(legacyRows),'jz.config.v1':JSON.stringify({autoExport:'off',snapOn:false,lastCat:{expense:legacyCat,income:'工资'}})}}), e=a.els, jz=a.windowShim.__jz;
+    e.get('fab').onclick();
+    ok(!e.get('cats').innerHTML.includes('data-cat="'+legacyCat+'"'),'记忆的旧分类不出现在新建面板：'+legacyCat);
+    fire(e.get('typeSeg'),'click',{type:'income'});fire(e.get('typeSeg'),'click',{type:'expense'});
+    ok(!e.get('cats').innerHTML.includes('data-cat="'+legacyCat+'"'),'切换收支不带回旧分类：'+legacyCat);
+    e.get('sheetCancel').onclick();
+    e.get('categoryFilter').value=legacyCat;e.get('categoryFilter').onchange();
+    eq(e.get('listCount').textContent,'1 笔记录','旧分类仍能筛选：'+legacyCat);
+    fire(e.get('listBox'),'click',{id:'old-category'});
+    fire(e.get('typeSeg'),'click',{type:'expense'});
+    ok(e.get('cats').innerHTML.includes('cat on" data-cat="'+legacyCat+'"'),'编辑点击同一收支类型保留旧分类：'+legacyCat);
+    e.get('amt').value='20';e.get('sheetSave').onclick();
+    eq(recs(a)[0].cat,legacyCat,'保存编辑不改写旧分类：'+legacyCat);
+    eq(recs(a)[0].id,'old-category','保存编辑保留 ID：'+legacyCat);
+    eq(jz.parseBackupText(JSON.stringify(jz.buildBackup())).records[0].cat,legacyCat,'备份恢复保留旧分类：'+legacyCat);
+  }
+  step('理财分类可分别记为支出和收入',()=>{
+    const a=runApp(),e=a.els;
+    for(const [type,amount] of [['expense','100'],['income','20']]){
+      e.get('fab').onclick();fire(e.get('typeSeg'),'click',{type});fire(e.get('cats'),'click',{cat:'理财'});
+      e.get('amt').value=amount;e.get('sheetSave').onclick();
+    }
+    eq(recs(a).map(r=>[r.type,r.cat,r.amount]),[['expense','理财',10000],['income','理财',2000]],'理财收支分别保存');
+    ok(/100\.00/.test(e.get('sumExp').innerHTML),'理财支出计入月度支出');
+    eq(e.get('sumInc').textContent,'20.00','理财收入计入月度收入');
+  });
+  step('选择类型只保护当前金额输入焦点',()=>{
+    const a=runApp(),e=a.els;let prevented=false;
+    const press={target:{closest:()=>({})},button:0,cancelable:true,preventDefault(){prevented=true;}};
+    a.documentShim.activeElement=e.get('amt');
+    e.get('cats')._h.mousedown(press);eq(prevented,true,'鼠标按下分类不夺走金额焦点');
+    prevented=false;e.get('typeSeg')._h.mousedown(press);eq(prevented,true,'鼠标按下收支类型保留金额焦点');
+    prevented=false;a.documentShim.activeElement=e.get('note');e.get('cats')._h.mousedown(press);eq(prevented,false,'备注输入时不强制金额聚焦');
+    a.documentShim.activeElement=e.get('amt');e.get('cats')._h.mousedown({...press,button:2});eq(prevented,false,'不拦截右键');
   });
 
   const seedNeg = {
@@ -922,6 +962,7 @@ if (app) {
   e.get('searchInput').value = '18.00'; fireInput(e.get('searchInput'));
   eq(e.get('listCount').textContent, '1 笔记录', '支持金额搜索');
   const searchUi=runApp({seed}), se=searchUi.els;
+  se.get('monthPicker').value='2026-10';se.get('monthPicker').onchange();
   eq(se.get('searchPopover').hidden,true,'搜索框默认隐藏，不占页面位置');
   se.get('toggleSearch').onclick();
   eq(se.get('searchPopover').hidden,false,'放大镜展开搜索框');

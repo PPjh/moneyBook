@@ -51,8 +51,9 @@ const origin = `http://127.0.0.1:${server.address().port}`;
 const browser = await chromium.launch({headless:true, channel:process.env.MONEYBOOK_BROWSER_CHANNEL || 'msedge'});
 const results = [], errors = [];
 async function context(native, pin = null, options = {}) {
-  const ctx = await browser.newContext({viewport:options.viewport || {width:390,height:844},deviceScaleFactor:options.deviceScaleFactor || 1,colorScheme:'light',reducedMotion:'reduce'});
-  await ctx.addInitScript(({native,rows,config,pin,version}) => {
+  const ctx = await browser.newContext({viewport:options.viewport || {width:390,height:844},deviceScaleFactor:options.deviceScaleFactor || 1,hasTouch:!!options.hasTouch,isMobile:!!options.hasTouch,colorScheme:'light',reducedMotion:'reduce'});
+  await ctx.addInitScript(({native,rows,config,pin,version,noPointer}) => {
+    if(noPointer)Object.defineProperty(window,'PointerEvent',{configurable:true,value:undefined});
     if(!native) {
       if(!localStorage.getItem('jz.records.v1')) {
         localStorage.setItem('jz.records.v1',JSON.stringify(rows)); localStorage.setItem('jz.config.v1',JSON.stringify(config));
@@ -130,7 +131,7 @@ async function context(native, pin = null, options = {}) {
         }catch(e){save();window.__moneybookResolve(id,{ok:false,error:e.message});}
       },0)
     };
-  },{native,rows:options.rows || rows,config:{...config,...options.config},pin,version});
+  },{native,rows:options.rows || rows,config:{...config,...options.config},pin,version,noPointer:!!options.noPointer});
   const page = await ctx.newPage();page.on('pageerror',e=>errors.push(e.message));page.on('dialog',d=>d.accept());
   await page.goto(origin+(native?'/native/':'/web/'),{waitUntil:'networkidle'});
   return {ctx,page};
@@ -278,6 +279,97 @@ try {
   assert.equal(await p.evaluate(month=>window.__nativeHarness.config.budgets[month],month),900000);
   results.push('native document import -> shared preview -> confirmed native replacement includes budgets');
   await web.ctx.close();await native.ctx.close();
+  async function openNewEntry(page){
+    await page.locator('#fab').click();
+    await page.waitForFunction(()=>document.activeElement===document.getElementById('amt'));
+  }
+  for(const isNative of [false,true]){
+    for(const mode of ['mouse','touch','mouse-fallback']){
+      const test=await context(isNative,null,{hasTouch:mode==='touch',noPointer:mode==='mouse-fallback',config:{lastCat:{expense:'水电',income:'工资'}}}), page=test.page;
+      const choose=selector=>mode==='touch'?page.locator(selector).tap():page.locator(selector).click();
+      if(mode==='mouse-fallback')assert.equal(await page.evaluate(()=>typeof window.PointerEvent),'undefined');
+      await openNewEntry(page);
+      assert.equal(await page.locator('#cats .cat').count(),19,'new expenses offer exactly 19 active categories');
+      assert.equal(await page.locator('#cats .cat[data-cat="水电"],#cats .cat[data-cat="宠物"]').count(),0,'retired categories cannot return through lastCat');
+      assert.match(await page.locator('#cats .cat[data-cat="理财"]').innerText(),/📈/);
+      await page.locator('#amt').fill('123.45');
+      await page.evaluate(()=>{
+        window.__amountBlurCount=0;
+        document.getElementById('amt').addEventListener('blur',()=>window.__amountBlurCount++);
+        document.getElementById('amt').setSelectionRange(2,2);
+      });
+      await choose('#cats .cat[data-cat="理财"]');
+      assert.equal(await page.locator('#cats .cat.on').getAttribute('data-cat'),'理财');
+      assert.equal(await page.evaluate(()=>document.activeElement.id),'amt','category selection preserves amount focus: '+mode);
+      assert.equal(await page.locator('#amt').inputValue(),'123.45');
+      assert.equal(await page.locator('#amt').evaluate(el=>el.selectionStart),2,'selecting a category does not reset the amount cursor');
+      await choose('#typeSeg button[data-type="income"]');
+      await choose('#typeSeg button[data-type="expense"]');
+      assert.equal(await page.locator('#cats .cat.on').getAttribute('data-cat'),'理财','finance exists for both income and expense');
+      assert.equal(await page.evaluate(()=>document.activeElement.id),'amt','type selection preserves amount focus: '+mode);
+      assert.equal(await page.evaluate(()=>window.__amountBlurCount),0,'mouse/touch selection must not blur and reopen the keyboard: '+mode);
+      if(isNative&&mode==='touch')await page.screenshot({path:join(output,version+'-finance-entry.png')});
+      await page.locator('#sheetSave').click();
+      await openNewEntry(page);await page.locator('#amt').fill('25.00');
+      await choose('#typeSeg button[data-type="income"]');
+      await choose('#cats .cat[data-cat="理财"]');
+      assert.equal(await page.evaluate(()=>document.activeElement.id),'amt');
+      await page.locator('#sheetSave').click();
+      const finance=await page.evaluate(()=>window.__jz.buildBackup().records.filter(r=>r.cat==='理财'));
+      assert.deepEqual(finance.map(r=>[r.type,r.amount]).sort(),[['expense',12345],['income',2500]],'income/expense finance save independently');
+      await openNewEntry(page);
+      await page.keyboard.press('Tab');
+      assert.equal(await page.evaluate(()=>document.activeElement.classList.contains('cat')),true,'Tab can leave amount for categories');
+      await page.keyboard.press('Space');
+      assert.equal(await page.evaluate(()=>document.activeElement===document.querySelector('#cats .cat.on')),true,'Space activation keeps keyboard focus on its category');
+      await page.keyboard.press('Tab');await page.keyboard.press('Enter');
+      assert.equal(await page.evaluate(()=>document.activeElement===document.querySelector('#cats .cat.on')),true,'Enter activation is not forced back to amount');
+      await page.locator('#typeSeg button[data-type="income"]').focus();await page.keyboard.press('Enter');
+      assert.equal(await page.evaluate(()=>document.activeElement.dataset.type),'income','keyboard type activation keeps its button focus');
+      await page.locator('#note').fill('正常备注');
+      assert.equal(await page.evaluate(()=>document.activeElement.id),'note');
+      await choose('#cats .cat[data-cat="奖金"]');
+      assert.notEqual(await page.evaluate(()=>document.activeElement.id),'amt','category choice from note does not steal focus back to amount');
+      await page.locator('#date').focus();
+      assert.equal(await page.evaluate(()=>document.activeElement.id),'date','date remains normally focusable');
+      await page.locator('#sheetCancel').click();
+      await page.locator('#fab').click();await page.locator('#note').focus();
+      await page.waitForTimeout(350);
+      assert.equal(await page.evaluate(()=>document.activeElement.id),'note','delayed initial autofocus must not override a quickly chosen field');
+      await test.ctx.close();
+    }
+  }
+  results.push('finance and entry focus: Web/native mouse, real touchscreen.tap and no-PointerEvent mousedown fallback; 19 new categories, finance income/expense saves, zero amount blur/cursor reset on category/type selection, keyboard Tab/Space/Enter, note/date and guarded delayed focus; real Android IME still needs phone verification');
+  for(const isNative of [false,true]){
+    for(const retired of ['水电','宠物']){
+      const historic=[{id:'old-water',type:'expense',amount:1100,cat:'水电',note:'旧水电',date:month+'-01',ts:1},{id:'old-pet',type:'expense',amount:2200,cat:'宠物',note:'旧宠物',date:month+'-02',ts:2}];
+      const test=await context(isNative,null,{rows:historic,config:{lastCat:{expense:retired,income:'工资'}}}), page=test.page;
+      await openNewEntry(page);
+      assert.equal(await page.locator('#cats .cat[data-cat="水电"],#cats .cat[data-cat="宠物"]').count(),0,'remembered retired category is not a new-entry option');
+      await page.locator('#sheetCancel').click();
+      await page.locator('#categoryFilter').selectOption(retired);
+      assert.equal(await page.locator('#listBox .rec').count(),1,'historical retired category remains filterable');
+      const oldId=await page.locator('#listBox .rec').getAttribute('data-id');
+      await page.locator('#listBox .rec').click();
+      assert.equal(await page.locator('#cats .cat.on').getAttribute('data-cat'),retired,'editing preserves retired category');
+      await page.locator('#typeSeg button[data-type="expense"]').click();
+      assert.equal(await page.locator('#cats .cat.on').getAttribute('data-cat'),retired,'clicking current expense type cannot silently recategorize a retired entry');
+      await page.locator('#typeSeg button[data-type="expense"]').focus();await page.keyboard.press('Enter');
+      assert.equal(await page.locator('#cats .cat.on').getAttribute('data-cat'),retired,'keyboard activation of unchanged type preserves retired category');
+      await page.locator('#amt').fill('99.00');await page.locator('#sheetSave').click();
+      let backup=await page.evaluate(()=>window.__jz.buildBackup());
+      assert.equal(backup.records.find(r=>r.id===oldId).cat,retired);
+      assert.equal(backup.records.find(r=>r.id===oldId).amount,9900);
+      assert.deepEqual(backup.records.map(r=>[r.id,r.cat]).sort(),historic.map(r=>[r.id,r.cat]).sort(),'editing legacy categories never changes identities or silently recategorizes records');
+      await page.reload({waitUntil:'networkidle'});
+      backup=await page.evaluate(()=>window.__jz.buildBackup());
+      assert.equal(backup.records.find(r=>r.id===oldId).amount,9900,'edited retired record survives reopen and backup');
+      await openNewEntry(page);
+      assert.equal(await page.locator('#cats .cat[data-cat="水电"],#cats .cat[data-cat="宠物"]').count(),0,'editing retired record cannot reintroduce it into next new entry');
+      await test.ctx.close();
+    }
+  }
+  results.push('retired water/pet categories: remembered defaults cannot return to new entries; old IDs/categories stay editable/filterable and survive reload/JSON backup on Web and native adapter');
   const phoneLayouts = [];
   async function checkPhone(page, name, compact = true) {
     const metrics = await page.evaluate(() => {
